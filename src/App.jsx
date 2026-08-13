@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { loadGameRecords, saveGameRecord, loadProfiles, createProfile, usingSharedDatabase, getAdminStatus, signInAdmin, signOutAdmin, updateGamePlayers, deleteGameRecord, updateProfileRecord, deleteProfileRecord, loadAdminAudit, logAdminAction } from "./data";
+import * as dataApi from "./data.js";
 import {
   Target,
   Trophy,
@@ -29,6 +29,23 @@ import {
   History,
   Save,
 } from "lucide-react";
+
+const {
+  loadGameRecords,
+  saveGameRecord,
+  loadProfiles,
+  createProfile,
+  usingSharedDatabase,
+  getAdminStatus,
+  signInAdmin,
+  signOutAdmin,
+  updateGamePlayers,
+  deleteGameRecord,
+  updateProfileRecord,
+  deleteProfileRecord,
+  loadAdminAudit,
+  logAdminAction,
+} = dataApi;
 
 const ACTIVE_GAME_KEY = "half-it-active-game-v1";
 
