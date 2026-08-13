@@ -13,7 +13,13 @@ import {
   Award,
   Delete,
   AlertCircle,
+  Undo2,
+  Menu,
+  Volume2,
+  Sparkles,
 } from "lucide-react";
+
+const ACTIVE_GAME_KEY = "half-it-active-game-v1";
 
 const ROUNDS = [
   { name: "20s", rule: "Enter 1–9 based on the number of scoring 20s hit", kind: "units", min: 1, max: 9, multiplier: 20 },
@@ -88,10 +94,45 @@ export default function HalfItScoreboard() {
   const [storageError, setStorageError] = useState(false);
   const [savingGame, setSavingGame] = useState(false);
   const [statsName, setStatsName] = useState("");
+  const [statsFilter, setStatsFilter] = useState("all");
+  const [lastAction, setLastAction] = useState(null);
+  const [scoreAnimation, setScoreAnimation] = useState(null);
+  const [roundSummary, setRoundSummary] = useState(false);
+  const [roundTransition, setRoundTransition] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [resultAwards, setResultAwards] = useState({});
 
   useEffect(() => {
     loadGames();
+    try {
+      const saved = JSON.parse(localStorage.getItem(ACTIVE_GAME_KEY) || "null");
+      if (saved?.players?.length && saved.roundIndex < ROUNDS.length) {
+        setGameMode(saved.gameMode || "multiplayer");
+        setPlayers(saved.players);
+        setRoundIndex(saved.roundIndex || 0);
+        setPlayerIndex(saved.playerIndex || 0);
+        setScoreInput(saved.scoreInput || "");
+        setScreen("game");
+      }
+    } catch {}
   }, []);
+
+  useEffect(() => {
+    if (screen === "game" && players.length) {
+      localStorage.setItem(ACTIVE_GAME_KEY, JSON.stringify({ gameMode, players, roundIndex, playerIndex, scoreInput }));
+    }
+  }, [screen, gameMode, players, roundIndex, playerIndex, scoreInput]);
+
+  useEffect(() => {
+    let lock;
+    async function keepAwake() {
+      if (screen === "game" && "wakeLock" in navigator) {
+        try { lock = await navigator.wakeLock.request("screen"); } catch {}
+      }
+    }
+    keepAwake();
+    return () => { try { lock?.release(); } catch {} };
+  }, [screen]);
 
   async function loadGames() {
     try {
@@ -150,40 +191,66 @@ export default function HalfItScoreboard() {
     setRoundIndex(0);
     setPlayerIndex(0);
     setScoreInput("");
+    setLastAction(null);
     setScreen("game");
+  }
+
+  function playHalfSound() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sawtooth"; osc.frequency.setValueAtTime(180, ctx.currentTime); osc.frequency.exponentialRampToValueAtTime(85, ctx.currentTime + .28);
+      gain.gain.setValueAtTime(.16, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + .32);
+      osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + .33);
+    } catch {}
   }
 
   function advanceTurn(updatedPlayers) {
     if (playerIndex + 1 < updatedPlayers.length) {
       setPlayerIndex(playerIndex + 1);
-    } else if (roundIndex + 1 < ROUNDS.length) {
-      setPlayerIndex(0);
-      setRoundIndex(roundIndex + 1);
-    } else {
-      finishGame(updatedPlayers);
+      setScoreInput("");
+      return;
     }
+    if (roundIndex + 1 < ROUNDS.length) {
+      if (gameMode === "multiplayer") {
+        setRoundSummary(true);
+      } else {
+        beginNextRound();
+      }
+      setScoreInput("");
+      return;
+    }
+    finishGame(updatedPlayers);
     setScoreInput("");
   }
 
+  function beginNextRound() {
+    const nextIndex = roundIndex + 1;
+    if (nextIndex >= ROUNDS.length) return;
+    setRoundSummary(false);
+    setRoundTransition({ index: nextIndex, name: ROUNDS[nextIndex].name });
+    setTimeout(() => {
+      setRoundIndex(nextIndex);
+      setPlayerIndex(0);
+      setRoundTransition(null);
+      setLastAction(null);
+    }, 650);
+  }
+
   function addPoints(points, enteredValue = null) {
-    const updated = players.map((p, i) =>
-      i === playerIndex
-        ? {
-            ...p,
-            score: p.score + points,
-            history: [...p.history, {
-              round: ROUNDS[roundIndex].name,
-              delta: points,
-              half: false,
-              enteredValue,
-            }],
-          }
-        : p
-    );
+    const before = players;
+    const actor = players[playerIndex];
+    const updated = players.map((p, i) => i === playerIndex ? {
+      ...p, score: p.score + points,
+      history: [...p.history, { round: ROUNDS[roundIndex].name, delta: points, half: false, enteredValue }],
+    } : p);
+    setLastAction({ players: before, roundIndex, playerIndex, actor: actor.name, label: `+${points}` });
     setPlayers(updated);
     setFlash({ i: playerIndex, type: "score" });
-    setTimeout(() => setFlash(null), 420);
-    advanceTurn(updated);
+    setScoreAnimation({ type: "score", text: `+${points}` });
+    setTimeout(() => { setFlash(null); setScoreAnimation(null); advanceTurn(updated); }, 520);
   }
 
   function submitScore() {
@@ -208,37 +275,43 @@ export default function HalfItScoreboard() {
   }
 
   function halfIt() {
-    const updated = players.map((p, i) => {
-      if (i !== playerIndex) return p;
-      const newScore = Math.floor(p.score / 2);
-      return {
-        ...p,
-        score: newScore,
-        history: [...p.history, { round: ROUNDS[roundIndex].name, delta: newScore - p.score, half: true }],
-      };
+    const before = players;
+    const actor = players[playerIndex];
+    const oldScore = actor.score;
+    const newScore = Math.floor(oldScore / 2);
+    const updated = players.map((p, i) => i !== playerIndex ? p : {
+      ...p, score: newScore,
+      history: [...p.history, { round: ROUNDS[roundIndex].name, delta: newScore - p.score, half: true }],
     });
-    setPlayers(updated);
+    setLastAction({ players: before, roundIndex, playerIndex, actor: actor.name, label: `${oldScore} → ${newScore}` });
+    setPlayers(updated); playHalfSound();
     setFlash({ i: playerIndex, type: "half" });
-    setTimeout(() => setFlash(null), 420);
-    advanceTurn(updated);
+    setScoreAnimation({ type: "half", text: `${oldScore} → ${newScore}` });
+    setTimeout(() => { setFlash(null); setScoreAnimation(null); advanceTurn(updated); }, 620);
+  }
+
+  function undoLastThrow() {
+    if (!lastAction) return;
+    setPlayers(lastAction.players);
+    setRoundIndex(lastAction.roundIndex);
+    setPlayerIndex(lastAction.playerIndex);
+    setRoundSummary(false); setRoundTransition(null); setScoreInput(""); setLastAction(null);
   }
 
   function finishGame(finalPlayers) {
     const ranked = [...finalPlayers].sort((a, b) => b.score - a.score);
     const topScore = ranked[0]?.score;
-    const record = {
-      id: `g${Date.now()}`,
-      date: new Date().toISOString(),
-      mode: gameMode,
-      players: ranked.map((p) => ({
-        name: p.name,
-        score: p.score,
-        won: gameMode === "multiplayer" && p.score === topScore,
-      })),
-    };
-    saveGame(record);
-    setPlayers(finalPlayers);
-    setScreen("results");
+    const previousByName = {};
+    (allGames || []).forEach(g => g.players?.forEach(p => {
+      const k = p.name.toLowerCase(); previousByName[k] = Math.max(previousByName[k] ?? -1, p.score);
+    }));
+    const previousOverall = Math.max(-1, ...(allGames || []).filter(g => g.mode === "multiplayer").flatMap(g => g.players?.map(p => p.score) || []));
+    const awards = {};
+    ranked.forEach(p => { awards[p.name] = { personalBest: p.score > (previousByName[p.name.toLowerCase()] ?? -1), allTime: gameMode === "multiplayer" && p.score > previousOverall }; });
+    setResultAwards(awards);
+    const record = { id: `g${Date.now()}`, date: new Date().toISOString(), mode: gameMode,
+      players: ranked.map(p => ({ name:p.name, score:p.score, won:gameMode === "multiplayer" && p.score === topScore })) };
+    saveGame(record); setPlayers(finalPlayers); localStorage.removeItem(ACTIVE_GAME_KEY); setScreen("results");
   }
 
   function playAgain() {
@@ -289,30 +362,23 @@ export default function HalfItScoreboard() {
   const soloNames = useMemo(() => {
     if (!allGames) return [];
     const names = new Set();
-    allGames
-      .filter((g) => g.mode === "solo")
-      .forEach((g) => g.players.forEach((p) => names.add(p.name)));
-    return Array.from(names).sort((a, b) => a.localeCompare(b));
+    allGames.forEach(g => g.players?.forEach(p => names.add(p.name)));
+    return Array.from(names).sort((a,b) => a.localeCompare(b));
   }, [allGames]);
 
   const personalStats = useMemo(() => {
     if (!allGames || !statsName.trim()) return null;
     const lower = statsName.trim().toLowerCase();
     const rows = [];
-    allGames
-      .filter((g) => g.mode === "solo")
-      .forEach((g) => {
-        const mine = g.players.find((p) => p.name.toLowerCase() === lower);
-        if (mine) rows.push({ ...mine, date: g.date, gameId: g.id });
-      });
-
-    if (rows.length === 0) return { found: false };
-    const scores = rows.map((r) => r.score);
-    const best = Math.max(...scores);
-    const avg = Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
-    const highScores = [...rows].sort((a, b) => b.score - a.score || new Date(b.date) - new Date(a.date));
-    return { found: true, gamesPlayed: rows.length, best, avg, highScores };
-  }, [allGames, statsName]);
+    allGames.forEach(g => {
+      if (statsFilter !== "all" && g.mode !== statsFilter) return;
+      const mine = g.players?.find(p => p.name.toLowerCase() === lower);
+      if (mine) rows.push({ ...mine, date:g.date, gameId:g.id, mode:g.mode || (g.players?.length > 1 ? "multiplayer" : "solo") });
+    });
+    if (!rows.length) return { found:false };
+    const scores=rows.map(r=>r.score); const best=Math.max(...scores); const avg=Math.round(scores.reduce((a,b)=>a+b,0)/scores.length);
+    return { found:true, gamesPlayed:rows.length, best, avg, highScores:[...rows].sort((a,b)=>b.score-a.score || new Date(b.date)-new Date(a.date)) };
+  }, [allGames, statsName, statsFilter]);
 
   const current = players[playerIndex];
   const next = players.length > 1 ? players[(playerIndex + 1) % players.length] : null;
@@ -459,6 +525,28 @@ export default function HalfItScoreboard() {
         .all-scores[open] summary { border-bottom:1px solid var(--line); color:var(--lime); }
         .all-scores .mini-standings { padding:8px; }
 
+        .score-pop { position:absolute; right:18px; top:50%; transform:translateY(-50%); font-family:'Oswald',sans-serif; font-size:30px; font-weight:700; color:var(--lime); animation:scorePop .55s ease-out both; }
+        .score-pop.half { color:var(--red); font-size:24px; }
+        @keyframes scorePop { 0%{opacity:0;transform:translateY(-30%) scale(.7)} 35%{opacity:1;transform:translateY(-55%) scale(1.15)} 100%{opacity:0;transform:translateY(-90%) scale(1)} }
+        .undo-row { display:flex; justify-content:center; margin-top:7px; }
+        .undo-btn { border:0; background:transparent; color:var(--muted); padding:7px 12px; cursor:pointer; font-size:12px; display:flex; gap:6px; align-items:center; }
+        .round-overlay { position:fixed; inset:0; z-index:50; background:rgba(3,11,18,.94); display:grid; place-items:center; text-align:center; }
+        .round-overlay .big { font-family:'Oswald',sans-serif; font-size:56px; color:var(--lime); text-transform:uppercase; font-style:italic; }
+        .round-overlay .smallx { color:var(--muted); text-transform:uppercase; letter-spacing:.14em; font-size:13px; }
+        .summary { margin-top:12px; padding:14px; border:1px solid var(--line); border-radius:13px; background:var(--panel); }
+        .summary h3 { margin:0 0 10px; color:var(--lime); text-align:center; }
+        .summary-row { display:flex; justify-content:space-between; padding:8px 4px; border-bottom:1px solid var(--line); }
+        .summary-row:last-of-type { border-bottom:0; }
+        .menu-wrap { position:relative; }
+        .game-menu { position:absolute; right:0; top:42px; z-index:20; min-width:180px; border:1px solid var(--line); background:#07131e; border-radius:10px; padding:7px; box-shadow:0 14px 35px rgba(0,0,0,.4); }
+        .game-menu button { width:100%; padding:10px; border:0; background:transparent; color:var(--text); text-align:left; cursor:pointer; }
+        .game-menu .danger { color:var(--red); }
+        .filter-tabs { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:14px; }
+        .filter-tab { padding:9px 5px; border-radius:9px; border:1px solid var(--line); background:transparent; color:var(--muted); font-size:11px; cursor:pointer; }
+        .filter-tab.active { border-color:var(--lime); color:var(--lime); background:rgba(140,240,0,.06); }
+        .medal { width:30px; height:30px; display:grid; place-items:center; border-radius:50%; background:rgba(140,240,0,.09); font-weight:700; }
+        .pb-badge { margin-left:7px; color:var(--lime); font-size:10px; text-transform:uppercase; font-weight:700; }
+        .record-banner { border:1px solid var(--lime); background:rgba(140,240,0,.08); border-radius:13px; padding:13px; text-align:center; margin-bottom:12px; color:var(--lime); font-family:'Oswald',sans-serif; text-transform:uppercase; font-size:18px; }
         /* Compact game layout so the scoring controls fit typical Android screens without scrolling. */
         .app-game { padding-top:8px; padding-bottom:max(10px, env(safe-area-inset-bottom)); min-height:100dvh; }
         .app-game .nav { margin-bottom:7px; padding-bottom:7px; }
@@ -533,9 +621,17 @@ export default function HalfItScoreboard() {
           <h1>Half It</h1>
         </div>
         <div className="nav-btns">
-          <button className="icon-btn" onClick={() => setScreen("leaderboard")} title="Leaderboard"><Trophy size={17} /></button>
-          <button className="icon-btn" onClick={() => setScreen("personal")} title="My Scores"><BarChart2 size={17} /></button>
-          <button className="icon-btn" onClick={() => setScreen("home")} title="Home"><Home size={17} /></button>
+          {screen === "game" ? <div className="menu-wrap">
+            <button className="icon-btn" onClick={() => setMenuOpen(v => !v)} title="Game menu"><Menu size={18} /></button>
+            {menuOpen && <div className="game-menu">
+              <button onClick={() => { setMenuOpen(false); setScreen("leaderboard"); }}>Leaderboard</button>
+              <button className="danger" onClick={() => { if (confirm("Start a new game? Your current game will be lost.")) { localStorage.removeItem(ACTIVE_GAME_KEY); setMenuOpen(false); setScreen("home"); setPlayers([]); } }}>Start New Game</button>
+            </div>}
+          </div> : <>
+            <button className="icon-btn" onClick={() => setScreen("leaderboard")} title="Leaderboard"><Trophy size={17} /></button>
+            <button className="icon-btn" onClick={() => setScreen("personal")} title="My Scores"><BarChart2 size={17} /></button>
+            <button className="icon-btn" onClick={() => setScreen("home")} title="Home"><Home size={17} /></button>
+          </>}
         </div>
       </div>
 
@@ -614,6 +710,7 @@ export default function HalfItScoreboard() {
               <div className="now-name">{current.name}</div>
               <div className="now-score">{current.score}</div>
             </div>
+            {scoreAnimation && <div className={`score-pop ${scoreAnimation.type === "half" ? "half" : ""}`}>{scoreAnimation.text}</div>}
           </div>
 
           {next && (
@@ -638,7 +735,13 @@ export default function HalfItScoreboard() {
             </details>
           )}
 
-          {round.kind === "fixed" ? (
+          {roundSummary && gameMode === "multiplayer" ? (
+            <div className="summary">
+              <h3>Round {roundIndex + 1} Complete</h3>
+              {[...players].sort((a,b)=>b.score-a.score).map((p,i)=><div className="summary-row" key={p.name}><span>{i+1}. {p.name}</span><strong>{p.score}</strong></div>)}
+              <button className="btn btn-lime" style={{marginTop:12}} onClick={beginNextRound}>Next Round <ChevronRight size={17}/></button>
+            </div>
+          ) : round.kind === "fixed" ? (
             <div className="fixed-score-panel">
               <div className="fixed-score-copy">If the player scored exactly 45 with the 3 darts:</div>
               <button className="fixed-score-btn" onClick={submitFixedScore}>✓ Add 45 Points</button>
@@ -684,9 +787,12 @@ export default function HalfItScoreboard() {
             </>
           )}
 
-          <button className="half-btn" onClick={halfIt}>✕ &nbsp; Half It (Bust)</button>
+          {!roundSummary && <button className="half-btn" onClick={halfIt}>✕ &nbsp; Half It (Bust)</button>}
+          {lastAction && <div className="undo-row"><button className="undo-btn" onClick={undoLastThrow}><Undo2 size={14}/> Undo last throw</button></div>}
         </div>
       )}
+
+      {roundTransition && <div className="round-overlay"><div><div className="smallx">Round {roundTransition.index + 1}</div><div className="big">{roundTransition.name}</div><div className="smallx">Next target</div></div></div>}
 
       {screen === "results" && (
         <div>
@@ -696,11 +802,12 @@ export default function HalfItScoreboard() {
             <p>{savingGame ? "Saving score…" : gameMode === "solo" ? "Your practice score has been added to My Scores." : "Final standings — these scores count toward the leaderboard."}</p>
           </div>
 
+          {Object.values(resultAwards).some(a => a.allTime) && <div className="record-banner"><Sparkles size={20} style={{verticalAlign:-4, marginRight:6}}/> New All-Time Record!</div>}
           <div className="results-list">
             {[...players].sort((a, b) => b.score - a.score).map((p, i) => (
               <div className={`result-row ${gameMode === "multiplayer" && i === 0 ? "winner" : ""}`} key={`${p.name}-result`}>
                 <span className="rank">{i + 1}</span>
-                <span className="result-name">{gameMode === "multiplayer" && i === 0 && <Trophy size={14} color="var(--lime)" style={{ marginRight: 6, verticalAlign: -2 }} />}{p.name}</span>
+                <span className="result-name">{gameMode === "multiplayer" && i === 0 && <Trophy size={14} color="var(--lime)" style={{ marginRight: 6, verticalAlign: -2 }} />}{p.name}{resultAwards[p.name]?.personalBest && <span className="pb-badge">★ Personal Best</span>}{resultAwards[p.name]?.allTime && <span className="pb-badge">⚡ All-Time #1</span>}</span>
                 <span className="score">{p.score}</span>
               </div>
             ))}
@@ -727,7 +834,7 @@ export default function HalfItScoreboard() {
             )}
             {multiplayerLeaderboard.map((row, i) => (
               <div className="lb-row" key={`${row.gameId}-${row.name}-${i}`}>
-                <span className="lb-rank">{i + 1}</span>
+                <span className={i < 3 ? "medal" : "lb-rank"}>{i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : i + 1}</span>
                 <span>{row.name}</span>
                 <span className="lb-date">{new Date(row.date).toLocaleDateString()}</span>
                 <span className="lb-score">{row.score}</span>
@@ -740,7 +847,7 @@ export default function HalfItScoreboard() {
 
       {screen === "personal" && (
         <div>
-          <div className="section-title"><BarChart2 size={15} /> My Scores — Solo Practice</div>
+          <div className="section-title"><BarChart2 size={15} /> My Scores</div>
           <div className="row" style={{ marginBottom: 14 }}>
             <input
               className="text-input"
@@ -754,10 +861,13 @@ export default function HalfItScoreboard() {
             </datalist>
           </div>
 
-          {!statsName.trim() && <p className="empty-note">Enter the name you use for solo practice.</p>}
+          <div className="filter-tabs">
+            {[['all','Combined'],['solo','Solo'],['multiplayer','Multiplayer']].map(([v,label]) => <button key={v} className={`filter-tab ${statsFilter===v?'active':''}`} onClick={()=>setStatsFilter(v)}>{label}</button>)}
+          </div>
+          {!statsName.trim() && <p className="empty-note">Enter your player name to see solo and multiplayer scores.</p>}
           {statsName.trim() && allGames === null && <p className="empty-note">Loading…</p>}
           {statsName.trim() && personalStats && !personalStats.found && (
-            <p className="empty-note">No solo practice scores found for “{statsName.trim()}”.</p>
+            <p className="empty-note">No {statsFilter === "all" ? "scores" : statsFilter + " scores"} found for “{statsName.trim()}”.</p>
           )}
 
           {personalStats?.found && (
@@ -773,13 +883,13 @@ export default function HalfItScoreboard() {
                 {personalStats.highScores.map((row, i) => (
                   <div className="lb-row" key={`${row.gameId}-${i}`}>
                     <span className="lb-rank">{i + 1}</span>
-                    <span>{i === 0 ? "Best" : "Practice"}</span>
+                    <span>{i === 0 ? "Best" : row.mode === "solo" ? "Solo" : "Multiplayer"}</span>
                     <span className="lb-date">{new Date(row.date).toLocaleDateString()}</span>
                     <span className="lb-score">{row.score}</span>
                   </div>
                 ))}
               </div>
-              <p className="shared-note">Solo practice scores are sorted highest to lowest and never appear on the competitive leaderboard.</p>
+              <p className="shared-note">Choose Combined, Solo or Multiplayer above. Scores are always sorted highest to lowest.</p>
             </>
           )}
         </div>
