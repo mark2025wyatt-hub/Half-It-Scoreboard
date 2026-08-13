@@ -114,6 +114,8 @@ export default function HalfItScoreboard() {
   const [profileReturn, setProfileReturn] = useState("players");
   const [statsProfileId, setStatsProfileId] = useState(null);
   const [roundStartScores, setRoundStartScores] = useState({});
+  const [draggingIndex, setDraggingIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
 
   useEffect(() => {
     loadGames();
@@ -462,6 +464,31 @@ export default function HalfItScoreboard() {
     });
   }
 
+  function reorderPlayers(fromIndex, toIndex) {
+    if (fromIndex === null || toIndex === null || fromIndex === toIndex) return;
+    setPlayers(current => {
+      if (fromIndex < 0 || toIndex < 0 || fromIndex >= current.length || toIndex >= current.length) return current;
+      const reordered = [...current];
+      const [moved] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+      return reordered;
+    });
+  }
+
+  function finishPlayerDrag() {
+    if (draggingIndex !== null && dragOverIndex !== null) reorderPlayers(draggingIndex, dragOverIndex);
+    setDraggingIndex(null);
+    setDragOverIndex(null);
+  }
+
+  function handlePlayerPointerMove(e) {
+    if (draggingIndex === null) return;
+    const el = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('[data-order-index]');
+    if (!el) return;
+    const index = Number(el.dataset.orderIndex);
+    if (Number.isInteger(index)) setDragOverIndex(index);
+  }
+
   function changePlayers() {
     beginSetup(gameMode);
   }
@@ -749,6 +776,17 @@ export default function HalfItScoreboard() {
         .move.up { color:var(--lime); } .move.down { color:var(--red); } .move.same { color:var(--muted); }
         .setup-tools { display:flex; justify-content:flex-end; margin:-2px 0 8px; }
         .random-btn { border:1px solid var(--line); color:var(--cyan); background:transparent; border-radius:9px; padding:7px 10px; font-size:11px; font-weight:700; cursor:pointer; }
+        .throw-order-note { color:var(--muted); font-size:11px; margin:-2px 0 8px; }
+        .player-chip.order-row { gap:8px; transition:border-color .12s, transform .12s, background .12s; }
+        .player-chip.order-row.drag-over { border-color:var(--lime); background:rgba(130,255,120,.08); }
+        .player-chip.order-row.dragging { opacity:.6; transform:scale(.985); }
+        .drag-handle {
+          flex:0 0 36px; width:36px; height:34px; border:1px solid var(--line); border-radius:8px;
+          display:flex; align-items:center; justify-content:center; color:var(--muted); background:rgba(255,255,255,.025);
+          font-size:18px; letter-spacing:-3px; cursor:grab; user-select:none; touch-action:none;
+        }
+        .drag-handle:active { cursor:grabbing; border-color:var(--lime); color:var(--lime); }
+        .order-player-copy { flex:1; min-width:0; }
         .champ-crown { margin-left:6px; font-size:14px; }
         .result-meta { width:100%; padding-left:34px; display:flex; gap:12px; color:var(--muted); font-size:10px; margin-top:3px; }
         .rematch-note { color:var(--muted); font-size:11px; text-align:center; margin-top:-2px; }
@@ -959,10 +997,35 @@ export default function HalfItScoreboard() {
 
           {players.length > 0 && <div className="selected-players">
             <div className="section-title" style={{marginTop:14}}>Throwing Order</div>
-            {gameMode === "multiplayer" && players.length > 1 && <div className="setup-tools"><button className="random-btn" onClick={randomizePlayers}>🎲 Randomise order</button></div>}
+            {gameMode === "multiplayer" && players.length > 1 && (
+              <>
+                <div className="throw-order-note">Drag the grip beside a player to set the throwing order — useful after closest-to-bull.</div>
+                <div className="setup-tools"><button className="random-btn" onClick={randomizePlayers}>🎲 Randomise order</button></div>
+              </>
+            )}
             {players.map((p, i) => (
-              <div className="player-chip" key={`${p.profileId || p.name}-${i}`}>
-                <span><b>{i + 1}.</b> {p.name}{isDefendingChampion(p) && <span className="champ-crown" title="Defending champion">👑</span>} {p.guest && <em>Guest</em>}</span>
+              <div
+                className={`player-chip order-row ${draggingIndex === i ? "dragging" : ""} ${dragOverIndex === i && draggingIndex !== i ? "drag-over" : ""}`}
+                key={`${p.profileId || p.name}-${i}`}
+                data-order-index={i}
+                onDragOver={(e) => { e.preventDefault(); setDragOverIndex(i); }}
+                onDrop={(e) => { e.preventDefault(); reorderPlayers(draggingIndex, i); setDraggingIndex(null); setDragOverIndex(null); }}
+              >
+                {gameMode === "multiplayer" && players.length > 1 && (
+                  <span
+                    className="drag-handle"
+                    title="Drag to reorder"
+                    aria-label={`Drag ${p.name} to change throwing order`}
+                    draggable
+                    onDragStart={(e) => { setDraggingIndex(i); setDragOverIndex(i); e.dataTransfer.effectAllowed = "move"; }}
+                    onDragEnd={() => { setDraggingIndex(null); setDragOverIndex(null); }}
+                    onPointerDown={(e) => { setDraggingIndex(i); setDragOverIndex(i); e.currentTarget.setPointerCapture?.(e.pointerId); }}
+                    onPointerMove={handlePlayerPointerMove}
+                    onPointerUp={(e) => { try { e.currentTarget.releasePointerCapture?.(e.pointerId); } catch {} finishPlayerDrag(); }}
+                    onPointerCancel={() => { setDraggingIndex(null); setDragOverIndex(null); }}
+                  >⋮⋮</span>
+                )}
+                <span className="order-player-copy"><b>{i + 1}.</b> {p.name}{isDefendingChampion(p) && <span className="champ-crown" title="Defending champion">👑</span>} {p.guest && <em>Guest</em>}</span>
                 <button onClick={() => removePlayer(i)}><X size={16} /></button>
               </div>
             ))}
