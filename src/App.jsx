@@ -117,6 +117,7 @@ export default function HalfItScoreboard() {
   const [roundIndex, setRoundIndex] = useState(0);
   const [playerIndex, setPlayerIndex] = useState(0);
   const [scoreInput, setScoreInput] = useState("");
+  const [dartVisit, setDartVisit] = useState([]);
   const [flash, setFlash] = useState(null);
   const [allGames, setAllGames] = useState(null);
   const [storageError, setStorageError] = useState(false);
@@ -186,11 +187,11 @@ export default function HalfItScoreboard() {
 
   useEffect(() => {
     if (screen === "game" && players.length) {
-      const snapshot = { gameMode, players, roundIndex, playerIndex, scoreInput, roundSummary, lastAction, roundStartScores };
+      const snapshot = { gameMode, players, roundIndex, playerIndex, scoreInput, dartVisit, roundSummary, lastAction, roundStartScores };
       localStorage.setItem(ACTIVE_GAME_KEY, JSON.stringify(snapshot));
       setSavedActiveGame(snapshot);
     }
-  }, [screen, gameMode, players, roundIndex, playerIndex, scoreInput, roundSummary, lastAction, roundStartScores]);
+  }, [screen, gameMode, players, roundIndex, playerIndex, scoreInput, dartVisit, roundSummary, lastAction, roundStartScores]);
 
   useEffect(() => {
     let lock;
@@ -310,6 +311,7 @@ export default function HalfItScoreboard() {
     setRoundIndex(savedActiveGame.roundIndex || 0);
     setPlayerIndex(savedActiveGame.playerIndex || 0);
     setScoreInput(savedActiveGame.scoreInput || "");
+    setDartVisit(savedActiveGame.dartVisit || []);
     setRoundSummary(Boolean(savedActiveGame.roundSummary));
     setLastAction(savedActiveGame.lastAction || null);
     setRoundStartScores(savedActiveGame.roundStartScores || Object.fromEntries(savedActiveGame.players.map(p => [p.profileId || p.name, p.score || 0])));
@@ -353,6 +355,7 @@ export default function HalfItScoreboard() {
     setRoundIndex(0);
     setPlayerIndex(0);
     setScoreInput("");
+    setDartVisit([]);
     setLastAction(null);
     setRoundStartScores(Object.fromEntries(players.map(p => [p.profileId || p.name, p.score || 0])));
     setScreen("game");
@@ -371,6 +374,7 @@ export default function HalfItScoreboard() {
   }
 
   function advanceTurn(updatedPlayers) {
+    setDartVisit([]);
     if (playerIndex + 1 < updatedPlayers.length) {
       setPlayerIndex(playerIndex + 1);
       setScoreInput("");
@@ -394,6 +398,7 @@ export default function HalfItScoreboard() {
   }
 
   function beginNextRound() {
+    setDartVisit([]);
     const nextIndex = roundIndex + 1;
     if (nextIndex >= ROUNDS.length) return;
     setRoundSummary(false);
@@ -419,6 +424,32 @@ export default function HalfItScoreboard() {
     setFlash({ i: playerIndex, type: "score" });
     setScoreAnimation({ type: "score", text: `+${points}` });
     setTimeout(() => { setFlash(null); setScoreAnimation(null); advanceTurn(updated); }, 520);
+  }
+
+  function isNumberTargetRound(r = round) {
+    return r?.kind === "units" && r.multiplier >= 11 && r.multiplier <= 20;
+  }
+
+  function selectDartResult(type) {
+    if (!isNumberTargetRound() || dartVisit.length >= 3) return;
+    const multiplier = type === "single" ? 1 : type === "double" ? 2 : type === "triple" ? 3 : 0;
+    const dart = { type, multiplier, points: round.multiplier * multiplier };
+    const next = [...dartVisit, dart];
+    setDartVisit(next);
+    if (next.length === 3 && next.every(d => d.type === "miss")) {
+      setTimeout(() => halfIt(), 180);
+    }
+  }
+
+  function undoDart() {
+    setDartVisit(v => v.slice(0, -1));
+  }
+
+  function submitDartVisit() {
+    if (dartVisit.length !== 3) return;
+    if (dartVisit.every(d => d.type === "miss")) { halfIt(); return; }
+    const points = dartVisit.reduce((sum, d) => sum + d.points, 0);
+    addPoints(points, { darts: dartVisit });
   }
 
   function submitScore() {
@@ -503,6 +534,7 @@ export default function HalfItScoreboard() {
     setRoundIndex(0);
     setPlayerIndex(0);
     setScoreInput("");
+    setDartVisit([]);
     setRoundStartScores(Object.fromEntries(players.map(p => [p.profileId || p.name, 0])));
     setLastAction(null);
     setRoundSummary(false);
@@ -826,6 +858,26 @@ export default function HalfItScoreboard() {
         .fixed-score-panel { margin-top:16px; border:1px solid var(--line); border-radius:12px; padding:14px; background:#07131e; text-align:center; }
         .fixed-score-copy { color:var(--muted); font-size:12px; margin-bottom:10px; }
         .fixed-score-btn { width:100%; min-height:62px; border-radius:11px; border:1px solid var(--lime); background:linear-gradient(180deg,var(--lime-2),var(--lime)); color:#06121d; font-family:'Oswald',sans-serif; font-size:19px; font-weight:700; text-transform:uppercase; cursor:pointer; }
+
+        .dart-entry { margin-top:14px; }
+        .dart-entry-title { text-align:center; font-family:'Oswald',sans-serif; text-transform:uppercase; font-size:12px; letter-spacing:.08em; color:var(--muted); }
+        .dart-slots { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:9px 0 12px; }
+        .dart-slot { min-height:54px; border:1px solid var(--line); border-radius:12px; background:#07131e; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+        .dart-slot .dart-no { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
+        .dart-slot .dart-result { margin-top:3px; font-family:'Oswald',sans-serif; font-size:16px; font-weight:700; text-transform:uppercase; color:var(--text); }
+        .dart-slot.filled { border-color:#35536a; }
+        .dart-slot.current { border-color:var(--lime); box-shadow:0 0 0 1px rgba(139,255,0,.12) inset; }
+        .dart-choice-stack { display:flex; flex-direction:column; gap:8px; }
+        .dart-choice { width:100%; min-height:54px; border-radius:13px; border:1px solid #31485b; background:linear-gradient(180deg,#112536,#0a1926); color:var(--text); display:flex; align-items:center; justify-content:space-between; padding:0 18px; cursor:pointer; }
+        .dart-choice:active { transform:scale(.985); border-color:var(--lime); background:#142d3f; }
+        .dart-choice strong { font-family:'Oswald',sans-serif; font-size:19px; font-style:italic; text-transform:uppercase; }
+        .dart-choice span { font-family:'IBM Plex Mono',monospace; color:var(--lime); font-size:14px; font-weight:700; }
+        .dart-choice.miss span { color:var(--muted); }
+        .dart-visit-total { margin:10px 0 8px; text-align:center; min-height:28px; font-family:'IBM Plex Mono',monospace; color:var(--lime); font-size:19px; font-weight:700; }
+        .dart-actions { display:grid; grid-template-columns:auto 1fr; gap:8px; }
+        .undo-dart { min-width:104px; border:1px solid var(--line); border-radius:11px; background:transparent; color:var(--muted); font-family:'Oswald',sans-serif; text-transform:uppercase; font-weight:600; cursor:pointer; }
+        .add-visit { min-height:56px; border:1px solid var(--lime); border-radius:11px; background:linear-gradient(180deg,var(--lime-2),var(--lime)); color:#06121d; font-family:'Oswald',sans-serif; font-size:18px; font-weight:700; text-transform:uppercase; cursor:pointer; }
+        .add-visit:disabled, .undo-dart:disabled { opacity:.35; cursor:not-allowed; }
 
         .keypad { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; margin-top:11px; }
         .key { min-height:62px; border-radius:11px; border:1px solid #31485b; background:linear-gradient(180deg,#112536,#0a1926); color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:24px; font-weight:700; cursor:pointer; }
@@ -1295,6 +1347,28 @@ export default function HalfItScoreboard() {
               <div className="fixed-score-copy">If the player scored exactly 45 with the 3 darts:</div>
               <button className="fixed-score-btn" onClick={submitFixedScore}>✓ Add 45 Points</button>
             </div>
+          ) : isNumberTargetRound() ? (
+            <div className="dart-entry">
+              <div className="dart-entry-title">Score each dart · Target {round.name}</div>
+              <div className="dart-slots">
+                {[0,1,2].map(i => {
+                  const d = dartVisit[i];
+                  const label = !d ? "—" : d.type === "miss" ? "MISS" : `${d.type === "single" ? "S" : d.type === "double" ? "D" : "T"}${round.multiplier}`;
+                  return <div key={i} className={`dart-slot ${d ? "filled" : ""} ${dartVisit.length === i ? "current" : ""}`}><div className="dart-no">Dart {i+1}</div><div className="dart-result">{label}</div></div>;
+                })}
+              </div>
+              <div className="dart-choice-stack">
+                <button className="dart-choice" onClick={() => selectDartResult("single")} disabled={dartVisit.length >= 3}><strong>Single</strong><span>+{round.multiplier}</span></button>
+                <button className="dart-choice" onClick={() => selectDartResult("double")} disabled={dartVisit.length >= 3}><strong>Double</strong><span>+{round.multiplier * 2}</span></button>
+                <button className="dart-choice" onClick={() => selectDartResult("triple")} disabled={dartVisit.length >= 3}><strong>Triple</strong><span>+{round.multiplier * 3}</span></button>
+                <button className="dart-choice miss" onClick={() => selectDartResult("miss")} disabled={dartVisit.length >= 3}><strong>Miss</strong><span>0</span></button>
+              </div>
+              <div className="dart-visit-total">{dartVisit.length ? `VISIT: +${dartVisit.reduce((sum,d)=>sum+d.points,0)}` : ""}</div>
+              <div className="dart-actions">
+                <button className="undo-dart" onClick={undoDart} disabled={!dartVisit.length}>↶ Undo Dart</button>
+                <button className="add-visit" onClick={submitDartVisit} disabled={dartVisit.length !== 3}>✓ Add {dartVisit.reduce((sum,d)=>sum+d.points,0)} Points</button>
+              </div>
+            </div>
           ) : (
             <>
               <div className={`score-display ${scoreInput === "" ? "empty" : ""}`}>
@@ -1336,7 +1410,7 @@ export default function HalfItScoreboard() {
             </>
           )}
 
-          {!roundSummary && <button className="half-btn" onClick={halfIt}>✕ &nbsp; Half It (Bust)</button>}
+          {!roundSummary && <button className="half-btn" onClick={halfIt}>✕ &nbsp; Half It {current ? `· ${current.score} → ${Math.floor(current.score / 2)}` : ""}</button>}
           {lastAction && <div className="undo-row"><button className="undo-btn" onClick={undoLastThrow}><Undo2 size={14}/> Undo last throw</button></div>}
         </div>
       )}
