@@ -86,6 +86,29 @@ function RoundRing({ roundIndex, size = 92 }) {
   );
 }
 
+function MiniScoreChart({ scores = [] }) {
+  const values = scores.slice(-10);
+  if (values.length < 2) return <div className="chart-empty">Play at least 2 games to see your form chart.</div>;
+  const width = 320, height = 116, padX = 14, padY = 14;
+  const min = Math.min(...values), max = Math.max(...values);
+  const range = Math.max(1, max - min);
+  const pts = values.map((v, i) => {
+    const x = padX + (i * (width - padX * 2)) / Math.max(1, values.length - 1);
+    const y = height - padY - ((v - min) / range) * (height - padY * 2);
+    return { x, y, v };
+  });
+  const polyline = pts.map(p => `${p.x},${p.y}`).join(" ");
+  return (
+    <div className="score-chart-wrap">
+      <svg className="score-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Last ten scores chart">
+        <line x1={padX} y1={height-padY} x2={width-padX} y2={height-padY} className="chart-axis" />
+        <polyline points={polyline} className="chart-line" />
+        {pts.map((p,i) => <g key={i}><circle cx={p.x} cy={p.y} r="4" className="chart-dot"/><text x={p.x} y={Math.max(10,p.y-9)} textAnchor="middle" className="chart-label">{p.v}</text></g>)}
+      </svg>
+    </div>
+  );
+}
+
 export default function HalfItScoreboard() {
   const [screen, setScreen] = useState("home");
   const [gameMode, setGameMode] = useState("multiplayer");
@@ -100,6 +123,7 @@ export default function HalfItScoreboard() {
   const [savingGame, setSavingGame] = useState(false);
   const [statsName, setStatsName] = useState("");
   const [statsFilter, setStatsFilter] = useState("all");
+  const [leaderboardTab, setLeaderboardTab] = useState("scores");
   const [lastAction, setLastAction] = useState(null);
   const [scoreAnimation, setScoreAnimation] = useState(null);
   const [roundSummary, setRoundSummary] = useState(false);
@@ -567,10 +591,67 @@ export default function HalfItScoreboard() {
       if (mine) rows.push({ ...mine, date:g.date, gameId:g.id, mode:g.mode || (g.players?.length > 1 ? "multiplayer" : "solo") });
     });
     if (!rows.length) return { found:false };
-    const scores=rows.map(r=>r.score); const best=Math.max(...scores); const avg=Math.round(scores.reduce((a,b)=>a+b,0)/scores.length);
+    const scores = rows.map(r => r.score);
+    const best = Math.max(...scores);
+    const avg = Math.round(scores.reduce((a,b)=>a+b,0)/scores.length);
     const wins = rows.filter(r => r.won).length;
-    return { found:true, gamesPlayed:rows.length, best, avg, wins, highScores:[...rows].sort((a,b)=>b.score-a.score || new Date(b.date)-new Date(a.date)) };
+    const chronological = [...rows].sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const last10 = chronological.slice(-10);
+    const last10Avg = Math.round(last10.reduce((sum,r)=>sum+r.score,0)/last10.length);
+    const avgDelta = last10Avg - avg;
+    const totalHalfIts = rows.reduce((sum,r)=>sum+(Number(r.halfIts)||0),0);
+    const rowsWithHalfData = rows.filter(r => Number.isFinite(Number(r.halfIts)));
+    const avgHalfIts = rowsWithHalfData.length ? (rowsWithHalfData.reduce((sum,r)=>sum+Number(r.halfIts||0),0)/rowsWithHalfData.length).toFixed(1) : "—";
+    const noHalfGames = rowsWithHalfData.filter(r => Number(r.halfIts) === 0).length;
+    const globalMultiBest = Math.max(-1, ...(allGames || []).filter(g=>g.mode==="multiplayer").flatMap(g=>g.players?.map(p=>p.score)||[]));
+    const achievements = [
+      rows.length >= 1 && { icon:"🎯", title:"First Game", detail:"Completed your first tracked game" },
+      rows.length >= 10 && { icon:"🔟", title:"10 Games", detail:"Ten tracked games completed" },
+      rows.length >= 50 && { icon:"🏅", title:"50 Games", detail:"Fifty tracked games completed" },
+      rows.length >= 100 && { icon:"💯", title:"100 Games", detail:"One hundred tracked games completed" },
+      best >= 600 && { icon:"🏆", title:"600 Club", detail:"Scored 600 or more" },
+      best >= 700 && { icon:"⚡", title:"700 Club", detail:"Scored 700 or more" },
+      wins >= 1 && { icon:"👑", title:"Match Winner", detail:"Won a multiplayer game" },
+      noHalfGames >= 1 && { icon:"🔥", title:"No Halves", detail:"Finished a game without a Half It" },
+      statsFilter !== "solo" && best === globalMultiBest && globalMultiBest >= 0 && { icon:"🌟", title:"All-Time #1", detail:"Owns the highest competitive score" },
+    ].filter(Boolean);
+    return {
+      found:true, gamesPlayed:rows.length, best, avg, wins, totalHalfIts, avgHalfIts, noHalfGames,
+      last10, last10Avg, avgDelta, achievements,
+      recent:[...chronological].reverse().slice(0,10),
+      highScores:[...rows].sort((a,b)=>b.score-a.score || new Date(b.date)-new Date(a.date))
+    };
   }, [allGames, statsName, statsProfileId, statsFilter]);
+
+  const playerRankings = useMemo(() => {
+    if (!allGames) return [];
+    return profiles.map(profile => {
+      const rows=[];
+      allGames.filter(g=>g.mode==="multiplayer").forEach(g => {
+        const p=g.players?.find(x => x.profileId === profile.id || (!x.profileId && x.name?.toLowerCase()===profile.displayName.toLowerCase()));
+        if (p) rows.push({...p,date:g.date});
+      });
+      if (!rows.length) return null;
+      const best=Math.max(...rows.map(r=>r.score));
+      const avg=Math.round(rows.reduce((s,r)=>s+r.score,0)/rows.length);
+      const wins=rows.filter(r=>r.won).length;
+      const halfRows=rows.filter(r=>Number.isFinite(Number(r.halfIts)));
+      const avgHalfIts=halfRows.length ? halfRows.reduce((s,r)=>s+Number(r.halfIts||0),0)/halfRows.length : null;
+      return { profile, best, avg, wins, games:rows.length, avgHalfIts };
+    }).filter(Boolean).sort((a,b)=>b.best-a.best || b.avg-a.avg || b.wins-a.wins);
+  }, [allGames, profiles]);
+
+  const leaderboardRecords = useMemo(() => {
+    const multi=(allGames||[]).filter(g=>g.mode==="multiplayer");
+    const entries=multi.flatMap(g=>(g.players||[]).map(p=>({...p,date:g.date,gameId:g.id})));
+    const highest=entries.length ? [...entries].sort((a,b)=>b.score-a.score)[0] : null;
+    const mostWins=playerRankings.length ? [...playerRankings].sort((a,b)=>b.wins-a.wins || b.best-a.best)[0] : null;
+    const mostGames=playerRankings.length ? [...playerRankings].sort((a,b)=>b.games-a.games || b.best-a.best)[0] : null;
+    const highestAvg=playerRankings.length ? [...playerRankings].sort((a,b)=>b.avg-a.avg || b.best-a.best)[0] : null;
+    const eligibleHalf=playerRankings.filter(r=>r.avgHalfIts !== null && r.games >= 3);
+    const fewestHalf=eligibleHalf.length ? [...eligibleHalf].sort((a,b)=>a.avgHalfIts-b.avgHalfIts || b.games-a.games)[0] : null;
+    return { highest, mostWins, mostGames, highestAvg, fewestHalf };
+  }, [allGames, playerRankings]);
 
   const selectedStatsProfile = useMemo(
     () => profiles.find(p => p.id === statsProfileId) || null,
@@ -834,6 +915,55 @@ export default function HalfItScoreboard() {
         .profile-stats-head { display:flex; align-items:center; gap:11px; padding:12px; border:1px solid var(--line); border-radius:12px; margin-bottom:12px; }
         .profile-stats-head > div { flex:1; display:flex; flex-direction:column; }
         .profile-stats-head strong { font-family:'Oswald',sans-serif; font-size:21px; text-transform:uppercase; }
+        .leaderboard-tabs { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:14px; }
+        .leaderboard-tabs button { background:var(--panel); border:1px solid var(--line); color:var(--muted); border-radius:9px; padding:10px 6px; font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:.04em; cursor:pointer; }
+        .leaderboard-tabs button.active { border-color:var(--lime); color:var(--lime); background:rgba(140,240,0,.08); }
+        .leader-player-row { width:100%; background:none; color:inherit; border:0; text-align:left; cursor:pointer; }
+        .leader-player-grid { display:grid; grid-template-columns:34px 1fr auto; gap:10px; align-items:center; padding:12px 2px; border-bottom:1px solid var(--line); }
+        .leader-player-grid:last-child { border-bottom:0; }
+        .leader-player-meta { display:flex; flex-direction:column; min-width:0; }
+        .leader-player-meta strong { font-size:14px; }
+        .leader-player-meta small { color:var(--muted); font-size:10px; margin-top:2px; }
+        .leader-player-best { text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:700; font-size:18px; }
+        .record-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+        .record-card { background:var(--bg-2); border:1px solid var(--line); border-radius:12px; padding:13px; min-height:96px; }
+        .record-card .record-icon { font-size:21px; }
+        .record-card .record-label { color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:.08em; margin-top:6px; }
+        .record-card .record-value { font-family:'IBM Plex Mono',monospace; color:var(--lime); font-size:20px; font-weight:700; margin-top:2px; }
+        .record-card .record-name { font-size:12px; margin-top:2px; }
+        .profile-hero-card { border:1px solid var(--line); border-radius:15px; padding:15px; background:linear-gradient(145deg,var(--panel),var(--panel-2)); margin-bottom:12px; }
+        .profile-hero-top { display:flex; align-items:center; gap:12px; }
+        .profile-hero-copy { flex:1; min-width:0; }
+        .profile-hero-copy h2 { font-size:25px; margin:0; }
+        .profile-hero-copy p { margin:2px 0 0; color:var(--muted); font-size:11px; }
+        .pb-hero { text-align:center; margin:16px 0 8px; }
+        .pb-hero .label { color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:.12em; }
+        .pb-hero .value { font-family:'IBM Plex Mono',monospace; font-size:42px; color:var(--lime); font-weight:700; line-height:1.05; }
+        .stats-grid.four { grid-template-columns:repeat(4,1fr); }
+        .stats-grid.four .stat .num { font-size:19px; }
+        .form-card { background:var(--panel); border:1px solid var(--line); border-radius:13px; padding:13px; margin-bottom:12px; }
+        .form-head { display:flex; justify-content:space-between; align-items:end; gap:10px; margin-bottom:8px; }
+        .form-head strong { font-family:'Oswald',sans-serif; text-transform:uppercase; }
+        .trend { font-family:'IBM Plex Mono',monospace; font-size:12px; }
+        .trend.up { color:var(--lime); } .trend.down { color:var(--red); } .trend.flat { color:var(--muted); }
+        .score-chart-wrap { width:100%; overflow:hidden; }
+        .score-chart { width:100%; height:128px; display:block; }
+        .chart-axis { stroke:var(--line); stroke-width:1; }
+        .chart-line { fill:none; stroke:var(--lime); stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
+        .chart-dot { fill:var(--bg); stroke:var(--lime); stroke-width:2; }
+        .chart-label { fill:var(--muted); font:8px 'IBM Plex Mono',monospace; }
+        .chart-empty { color:var(--muted); text-align:center; font-size:11px; padding:26px 4px; }
+        .achievement-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+        .achievement { background:var(--bg-2); border:1px solid var(--line); border-radius:11px; padding:11px; min-height:86px; }
+        .achievement .icon { font-size:20px; }
+        .achievement strong { display:block; font-size:12px; margin-top:5px; }
+        .achievement small { display:block; color:var(--muted); font-size:9px; margin-top:2px; line-height:1.3; }
+        .recent-row { display:grid; grid-template-columns:1fr auto auto; gap:8px; align-items:center; padding:10px 0; border-bottom:1px solid var(--line); }
+        .recent-row:last-child { border-bottom:0; }
+        .recent-mode { font-size:11px; }
+        .recent-date { color:var(--muted); font-size:10px; }
+        .recent-score { font-family:'IBM Plex Mono',monospace; font-weight:700; font-size:16px; }
+
         .mini-link { border:0; background:transparent; color:var(--cyan); cursor:pointer; font-size:11px; }
         .profile-quick-select { display:flex; gap:7px; overflow-x:auto; padding:1px 0 10px; }
         .profile-quick-select button { flex:0 0 auto; display:flex; align-items:center; gap:6px; border:1px solid var(--line); background:#07131e; color:var(--text); border-radius:999px; padding:5px 9px 5px 5px; cursor:pointer; font-size:11px; }
@@ -1200,22 +1330,46 @@ export default function HalfItScoreboard() {
 
       {screen === "leaderboard" && (
         <div>
-          <div className="section-title"><Trophy size={15} /> Competitive Leaderboard</div>
-          <div className="panel">
+          <div className="section-title"><Trophy size={15} /> Leaderboard</div>
+          <div className="leaderboard-tabs">
+            <button className={leaderboardTab==="scores"?"active":""} onClick={()=>setLeaderboardTab("scores")}>High Scores</button>
+            <button className={leaderboardTab==="players"?"active":""} onClick={()=>setLeaderboardTab("players")}>Players</button>
+            <button className={leaderboardTab==="records"?"active":""} onClick={()=>setLeaderboardTab("records")}>Records</button>
+          </div>
+
+          {leaderboardTab === "scores" && <div className="panel">
             {allGames === null && <p className="empty-note">Loading…</p>}
-            {allGames !== null && multiplayerLeaderboard.length === 0 && (
-              <p className="empty-note">No multiplayer games recorded yet. Scores appear here after a game with 2 or more players.</p>
-            )}
-            {multiplayerLeaderboard.map((row, i) => (
-              <div className="lb-row" key={`${row.gameId}-${row.name}-${i}`}>
-                <span className={i < 3 ? "medal" : "lb-rank"}>{i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : i + 1}</span>
-                <span>{row.name}</span>
+            {allGames !== null && multiplayerLeaderboard.length === 0 && <p className="empty-note">No multiplayer games recorded yet.</p>}
+            {multiplayerLeaderboard.map((row, i) => {
+              const profile = row.profileId ? profiles.find(p=>p.id===row.profileId) : profiles.find(p=>p.displayName.toLowerCase()===row.name?.toLowerCase());
+              return <button className="lb-row leader-player-row" key={`${row.gameId}-${row.name}-${i}`} onClick={()=>profile && viewProfile(profile)} disabled={!profile}>
+                <span className={i < 3 ? "medal" : "lb-rank"}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":i+1}</span>
+                <span>{row.name}{row.guest && <small className="muted"> · Guest</small>}</span>
                 <span className="lb-date">{new Date(row.date).toLocaleDateString()}</span>
                 <span className="lb-score">{row.score}</span>
+              </button>;
+            })}
+          </div>}
+
+          {leaderboardTab === "players" && <div className="panel">
+            {playerRankings.length === 0 && <p className="empty-note">No registered players have multiplayer results yet.</p>}
+            {playerRankings.map((row,i)=><button className="leader-player-row" key={row.profile.id} onClick={()=>viewProfile(row.profile)}>
+              <div className="leader-player-grid">
+                <span className={i<3?"medal":"lb-rank"}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":i+1}</span>
+                <span className="leader-player-meta"><strong>{row.profile.displayName}</strong><small>Avg {row.avg} · {row.wins} win{row.wins===1?"":"s"} · {row.games} games</small></span>
+                <span className="leader-player-best">{row.best}</span>
               </div>
-            ))}
-          </div>
-          <p className="shared-note">Highest competitive scores first. The same player can appear more than once.</p>
+            </button>)}
+          </div>}
+
+          {leaderboardTab === "records" && <div className="record-grid">
+            <div className="record-card"><div className="record-icon">🏆</div><div className="record-label">Highest Score</div><div className="record-value">{leaderboardRecords.highest?.score ?? "—"}</div><div className="record-name">{leaderboardRecords.highest?.name || "No record yet"}</div></div>
+            <div className="record-card"><div className="record-icon">🎯</div><div className="record-label">Highest Average</div><div className="record-value">{leaderboardRecords.highestAvg?.avg ?? "—"}</div><div className="record-name">{leaderboardRecords.highestAvg?.profile.displayName || "No record yet"}</div></div>
+            <div className="record-card"><div className="record-icon">👑</div><div className="record-label">Most Wins</div><div className="record-value">{leaderboardRecords.mostWins?.wins ?? "—"}</div><div className="record-name">{leaderboardRecords.mostWins?.profile.displayName || "No record yet"}</div></div>
+            <div className="record-card"><div className="record-icon">🎮</div><div className="record-label">Most Games</div><div className="record-value">{leaderboardRecords.mostGames?.games ?? "—"}</div><div className="record-name">{leaderboardRecords.mostGames?.profile.displayName || "No record yet"}</div></div>
+            <div className="record-card" style={{gridColumn:"1 / -1"}}><div className="record-icon">🔥</div><div className="record-label">Fewest Half Its / Game</div><div className="record-value">{leaderboardRecords.fewestHalf ? leaderboardRecords.fewestHalf.avgHalfIts.toFixed(1) : "—"}</div><div className="record-name">{leaderboardRecords.fewestHalf?.profile.displayName || "Needs at least 3 games with Half It data"}</div></div>
+          </div>}
+          <p className="shared-note">Competitive records use multiplayer games only. Tap a registered player to open their profile.</p>
         </div>
       )}
 
@@ -1298,64 +1452,56 @@ export default function HalfItScoreboard() {
 
       {screen === "personal" && (
         <div>
-          <div className="section-title"><BarChart2 size={15} /> Player Scores</div>
-          {selectedStatsProfile && (
-            <div className="profile-stats-head">
+          <div className="section-title"><BarChart2 size={15} /> Player Profile</div>
+          {selectedStatsProfile && <div className="profile-hero-card">
+            <div className="profile-hero-top">
               <span className={`profile-avatar large accent-${selectedStatsProfile.accent || "lime"}`}>{avatarGlyph(selectedStatsProfile.avatar)}</span>
-              <div><strong>{selectedStatsProfile.displayName}</strong><small>{selectedStatsProfile.nickname || "Player profile"}</small></div>
-              <button className="mini-link" onClick={() => { setStatsProfileId(null); setStatsName(""); }}>Change</button>
+              <div className="profile-hero-copy"><h2>{selectedStatsProfile.displayName}</h2><p>{selectedStatsProfile.nickname || "Half It player profile"}</p></div>
+              <button className="mini-link" onClick={()=>{setStatsProfileId(null);setStatsName("");}}>Change</button>
             </div>
-          )}
+            {personalStats?.found && <div className="pb-hero"><div className="label">Personal Best</div><div className="value">{personalStats.best}</div></div>}
+          </div>}
+
           {!selectedStatsProfile && <>
-            <div className="profile-quick-select">
-              {profiles.slice(0,8).map(profile => <button key={profile.id} onClick={() => { setStatsProfileId(profile.id); setStatsName(profile.displayName); }}><span className={`tiny-avatar accent-${profile.accent || "lime"}`}>{avatarGlyph(profile.avatar)}</span>{profile.displayName}</button>)}
-            </div>
-            <div className="row" style={{ marginBottom: 14 }}>
-              <input
-                className="text-input"
-                placeholder="Or type a player name…"
-                value={statsName}
-                onChange={(e) => { setStatsProfileId(null); setStatsName(e.target.value); }}
-                list="solo-names"
-              />
-              <datalist id="solo-names">
-                {soloNames.map((name) => <option value={name} key={name} />)}
-              </datalist>
-            </div>
+            <div className="profile-quick-select">{profiles.slice(0,8).map(profile=><button key={profile.id} onClick={()=>{setStatsProfileId(profile.id);setStatsName(profile.displayName);}}><span className={`tiny-avatar accent-${profile.accent || "lime"}`}>{avatarGlyph(profile.avatar)}</span>{profile.displayName}</button>)}</div>
+            <div className="row" style={{marginBottom:14}}><input className="text-input" placeholder="Or type a player name…" value={statsName} onChange={e=>{setStatsProfileId(null);setStatsName(e.target.value);}} list="solo-names"/><datalist id="solo-names">{soloNames.map(name=><option value={name} key={name}/>)}</datalist></div>
           </>}
 
-          <div className="filter-tabs">
-            {[['all','Combined'],['solo','Solo'],['multiplayer','Multiplayer']].map(([v,label]) => <button key={v} className={`filter-tab ${statsFilter===v?'active':''}`} onClick={()=>setStatsFilter(v)}>{label}</button>)}
-          </div>
-          {!statsName.trim() && <p className="empty-note">Enter your player name to see solo and multiplayer scores.</p>}
-          {statsName.trim() && allGames === null && <p className="empty-note">Loading…</p>}
-          {statsName.trim() && personalStats && !personalStats.found && (
-            <p className="empty-note">No {statsFilter === "all" ? "scores" : statsFilter + " scores"} found for “{statsName.trim()}”.</p>
-          )}
+          <div className="filter-tabs">{[['all','Combined'],['solo','Solo'],['multiplayer','Multiplayer']].map(([v,label])=><button key={v} className={`filter-tab ${statsFilter===v?'active':''}`} onClick={()=>setStatsFilter(v)}>{label}</button>)}</div>
+          {!statsName.trim() && <p className="empty-note">Choose a profile or enter a player name to see stats.</p>}
+          {statsName.trim() && allGames===null && <p className="empty-note">Loading…</p>}
+          {statsName.trim() && personalStats && !personalStats.found && <p className="empty-note">No {statsFilter==="all"?"scores":statsFilter+" scores"} found for “{statsName.trim()}”.</p>}
 
-          {personalStats?.found && (
-            <>
-              <div className="stats-grid">
-                <div className="stat"><div className="num">{personalStats.best}</div><div className="label">High Score</div></div>
-                <div className="stat"><div className="num">{personalStats.avg}</div><div className="label">Average</div></div>
-                <div className="stat"><div className="num">{personalStats.gamesPlayed}</div><div className="label">Games</div></div>
-              </div>
-              {statsFilter !== "solo" && <div className="wins-strip"><Trophy size={15}/> Multiplayer wins: <strong>{personalStats.wins}</strong></div>}
+          {personalStats?.found && <>
+            <div className="stats-grid four">
+              <div className="stat"><div className="num">{personalStats.avg}</div><div className="label">Average</div></div>
+              <div className="stat"><div className="num">{personalStats.gamesPlayed}</div><div className="label">Games</div></div>
+              <div className="stat"><div className="num">{personalStats.wins}</div><div className="label">Wins</div></div>
+              <div className="stat"><div className="num">{personalStats.avgHalfIts}</div><div className="label">Avg Half Its</div></div>
+            </div>
 
-              <div className="panel">
-                <div className="section-title" style={{ marginTop: 0 }}>High Scores</div>
-                {personalStats.highScores.map((row, i) => (
-                  <div className="lb-row" key={`${row.gameId}-${i}`}>
-                    <span className="lb-rank">{i + 1}</span>
-                    <span>{i === 0 ? "Best" : row.mode === "solo" ? "Solo" : "Multiplayer"}</span>
-                    <span className="lb-date">{new Date(row.date).toLocaleDateString()}</span>
-                    <span className="lb-score">{row.score}</span>
-                  </div>
-                ))}
-              </div>
-              <p className="shared-note">Choose Combined, Solo or Multiplayer above. Scores are always sorted highest to lowest.</p>
-            </>
-          )}
+            <div className="form-card">
+              <div className="form-head"><strong>Last 10 Games</strong><span className={`trend ${personalStats.avgDelta>0?'up':personalStats.avgDelta<0?'down':'flat'}`}>Last 10 avg {personalStats.last10Avg} {personalStats.avgDelta>0?`↑ +${personalStats.avgDelta}`:personalStats.avgDelta<0?`↓ ${personalStats.avgDelta}`:'—'}</span></div>
+              <MiniScoreChart scores={personalStats.last10.map(r=>r.score)}/>
+              <div className="muted small" style={{textAlign:"center"}}>Lifetime average: {personalStats.avg}</div>
+            </div>
+
+            <div className="panel">
+              <div className="section-title" style={{marginTop:0}}><Award size={14}/> Achievements</div>
+              {personalStats.achievements.length ? <div className="achievement-grid">{personalStats.achievements.map(a=><div className="achievement" key={a.title}><div className="icon">{a.icon}</div><strong>{a.title}</strong><small>{a.detail}</small></div>)}</div> : <p className="empty-note">Keep playing to unlock achievements.</p>}
+            </div>
+
+            <div className="panel">
+              <div className="section-title" style={{marginTop:0}}>Recent Form</div>
+              {personalStats.recent.map((row,i)=><div className="recent-row" key={`${row.gameId}-${i}`}><span><span className="recent-mode">{row.mode==="solo"?"Solo":"Multiplayer"}{row.won?" · 👑 Win":""}</span><br/><span className="recent-date">{new Date(row.date).toLocaleDateString()}</span></span><span className="muted small">{Number.isFinite(Number(row.halfIts))?`${row.halfIts} Half It${Number(row.halfIts)===1?'':'s'}`:''}</span><span className="recent-score">{row.score}</span></div>)}
+            </div>
+
+            <div className="panel">
+              <div className="section-title" style={{marginTop:0}}>High Scores</div>
+              {personalStats.highScores.map((row,i)=><div className="lb-row" key={`${row.gameId}-${i}`}><span className="lb-rank">{i+1}</span><span>{row.mode==="solo"?"Solo":"Multiplayer"}</span><span className="lb-date">{new Date(row.date).toLocaleDateString()}</span><span className="lb-score">{row.score}</span></div>)}
+            </div>
+            <p className="shared-note">Use Combined, Solo or Multiplayer to compare different parts of your game.</p>
+          </>}
         </div>
       )}
     </div>
