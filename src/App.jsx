@@ -116,6 +116,8 @@ export default function HalfItScoreboard() {
   const [roundStartScores, setRoundStartScores] = useState({});
   const [draggingIndex, setDraggingIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
+  const draggingIndexRef = useRef(null);
+  const dragOverIndexRef = useRef(null);
 
   useEffect(() => {
     loadGames();
@@ -475,18 +477,36 @@ export default function HalfItScoreboard() {
     });
   }
 
+  function startPlayerDrag(index, e) {
+    draggingIndexRef.current = index;
+    dragOverIndexRef.current = index;
+    setDraggingIndex(index);
+    setDragOverIndex(index);
+    if (e?.currentTarget?.setPointerCapture && e.pointerId !== undefined) {
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+    }
+  }
+
   function finishPlayerDrag() {
-    if (draggingIndex !== null && dragOverIndex !== null) reorderPlayers(draggingIndex, dragOverIndex);
+    draggingIndexRef.current = null;
+    dragOverIndexRef.current = null;
     setDraggingIndex(null);
     setDragOverIndex(null);
   }
 
   function handlePlayerPointerMove(e) {
-    if (draggingIndex === null) return;
+    const fromIndex = draggingIndexRef.current;
+    if (fromIndex === null) return;
+    e.preventDefault();
     const el = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('[data-order-index]');
     if (!el) return;
-    const index = Number(el.dataset.orderIndex);
-    if (Number.isInteger(index)) setDragOverIndex(index);
+    const toIndex = Number(el.dataset.orderIndex);
+    if (!Number.isInteger(toIndex) || toIndex === fromIndex) return;
+    reorderPlayers(fromIndex, toIndex);
+    draggingIndexRef.current = toIndex;
+    dragOverIndexRef.current = toIndex;
+    setDraggingIndex(toIndex);
+    setDragOverIndex(toIndex);
   }
 
   function changePlayers() {
@@ -783,7 +803,7 @@ export default function HalfItScoreboard() {
         .drag-handle {
           flex:0 0 36px; width:36px; height:34px; border:1px solid var(--line); border-radius:8px;
           display:flex; align-items:center; justify-content:center; color:var(--muted); background:rgba(255,255,255,.025);
-          font-size:18px; letter-spacing:-3px; cursor:grab; user-select:none; touch-action:none;
+          font-size:18px; letter-spacing:-3px; cursor:grab; user-select:none; -webkit-user-select:none; touch-action:none;
         }
         .drag-handle:active { cursor:grabbing; border-color:var(--lime); color:var(--lime); }
         .order-player-copy { flex:1; min-width:0; }
@@ -1009,7 +1029,7 @@ export default function HalfItScoreboard() {
                 key={`${p.profileId || p.name}-${i}`}
                 data-order-index={i}
                 onDragOver={(e) => { e.preventDefault(); setDragOverIndex(i); }}
-                onDrop={(e) => { e.preventDefault(); reorderPlayers(draggingIndex, i); setDraggingIndex(null); setDragOverIndex(null); }}
+                onDrop={(e) => { e.preventDefault(); const from = draggingIndexRef.current ?? draggingIndex; reorderPlayers(from, i); finishPlayerDrag(); }}
               >
                 {gameMode === "multiplayer" && players.length > 1 && (
                   <span
@@ -1017,12 +1037,12 @@ export default function HalfItScoreboard() {
                     title="Drag to reorder"
                     aria-label={`Drag ${p.name} to change throwing order`}
                     draggable
-                    onDragStart={(e) => { setDraggingIndex(i); setDragOverIndex(i); e.dataTransfer.effectAllowed = "move"; }}
-                    onDragEnd={() => { setDraggingIndex(null); setDragOverIndex(null); }}
-                    onPointerDown={(e) => { setDraggingIndex(i); setDragOverIndex(i); e.currentTarget.setPointerCapture?.(e.pointerId); }}
+                    onDragStart={(e) => { draggingIndexRef.current = i; dragOverIndexRef.current = i; setDraggingIndex(i); setDragOverIndex(i); e.dataTransfer.effectAllowed = "move"; }}
+                    onDragEnd={finishPlayerDrag}
+                    onPointerDown={(e) => startPlayerDrag(i, e)}
                     onPointerMove={handlePlayerPointerMove}
                     onPointerUp={(e) => { try { e.currentTarget.releasePointerCapture?.(e.pointerId); } catch {} finishPlayerDrag(); }}
-                    onPointerCancel={() => { setDraggingIndex(null); setDragOverIndex(null); }}
+                    onPointerCancel={finishPlayerDrag}
                   >⋮⋮</span>
                 )}
                 <span className="order-player-copy"><b>{i + 1}.</b> {p.name}{isDefendingChampion(p) && <span className="champ-crown" title="Defending champion">👑</span>} {p.guest && <em>Guest</em>}</span>
