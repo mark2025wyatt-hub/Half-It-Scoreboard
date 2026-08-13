@@ -789,13 +789,15 @@ export default function HalfItScoreboard() {
         h1, h2, h3, .sport { font-family: 'Oswald', sans-serif; text-transform: uppercase; }
         .nav { display:flex; align-items:center; justify-content:space-between; padding: 4px 0 14px; border-bottom:1px solid var(--line); margin-bottom:18px; }
         .brand { display:flex; align-items:center; gap:9px; cursor:pointer; }
+        .brand-app-icon { width:34px; height:34px; border-radius:9px; object-fit:cover; box-shadow:0 0 12px rgba(140,240,0,.14); }
         .brand h1 { margin:0; font-size:20px; font-style:italic; letter-spacing:.035em; }
         .nav-btns { display:flex; gap:7px; }
         .icon-btn { width:38px; height:38px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.025); color:var(--text); display:grid; place-items:center; cursor:pointer; }
         .icon-btn:hover { border-color:var(--lime); color:var(--lime); }
 
         .notice { display:flex; gap:8px; align-items:flex-start; padding:10px 12px; border:1px solid rgba(255,59,59,.7); background:rgba(255,59,59,.09); border-radius:10px; font-size:12px; margin-bottom:14px; }
-        .hero { text-align:center; padding:28px 12px 18px; }
+        .hero { text-align:center; padding:10px 0 18px; }
+        .home-banner { display:block; width:100%; height:auto; border-radius:14px; border:1px solid var(--line); box-shadow:0 12px 28px rgba(0,0,0,.24); }
         .hero-icon { color:var(--lime); margin-bottom:12px; }
         .hero h1 { margin:0; font-size:54px; font-style:italic; line-height:1; }
         .hero h1 span { color:var(--lime); }
@@ -1130,7 +1132,7 @@ export default function HalfItScoreboard() {
 
       <div className="nav">
         <div className="brand" onClick={() => setScreen("home")}>
-          <Target size={21} color="var(--lime)" />
+          <img className="brand-app-icon" src="/branding/half-it-icon.png" alt="Half It" />
           <h1>Half It</h1>
         </div>
         <div className="nav-btns">
@@ -1159,9 +1161,7 @@ export default function HalfItScoreboard() {
       {screen === "home" && (
         <div>
           <div className="hero">
-            <Target className="hero-icon" size={38} />
-            <h1>Half It<span>.</span></h1>
-            <p>15 rounds. Hit the target to build your score. Miss it and your total gets cut in half.</p>
+            <img className="home-banner" src="/branding/half-it-banner.png" alt="Half It — Hit. Score. Don’t lose half." />
           </div>
           {savedActiveGame?.players?.length && (
             <div className="panel" style={{ borderColor: "var(--lime)", marginBottom: 16 }}>
