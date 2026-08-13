@@ -113,6 +113,7 @@ export default function HalfItScoreboard() {
   const [profileForm, setProfileForm] = useState({ displayName: "", nickname: "", avatar: "target", accent: "lime" });
   const [profileReturn, setProfileReturn] = useState("players");
   const [statsProfileId, setStatsProfileId] = useState(null);
+  const [roundStartScores, setRoundStartScores] = useState({});
 
   useEffect(() => {
     loadGames();
@@ -127,11 +128,11 @@ export default function HalfItScoreboard() {
 
   useEffect(() => {
     if (screen === "game" && players.length) {
-      const snapshot = { gameMode, players, roundIndex, playerIndex, scoreInput, roundSummary, lastAction };
+      const snapshot = { gameMode, players, roundIndex, playerIndex, scoreInput, roundSummary, lastAction, roundStartScores };
       localStorage.setItem(ACTIVE_GAME_KEY, JSON.stringify(snapshot));
       setSavedActiveGame(snapshot);
     }
-  }, [screen, gameMode, players, roundIndex, playerIndex, scoreInput, roundSummary, lastAction]);
+  }, [screen, gameMode, players, roundIndex, playerIndex, scoreInput, roundSummary, lastAction, roundStartScores]);
 
   useEffect(() => {
     let lock;
@@ -253,6 +254,7 @@ export default function HalfItScoreboard() {
     setScoreInput(savedActiveGame.scoreInput || "");
     setRoundSummary(Boolean(savedActiveGame.roundSummary));
     setLastAction(savedActiveGame.lastAction || null);
+    setRoundStartScores(savedActiveGame.roundStartScores || Object.fromEntries(savedActiveGame.players.map(p => [p.profileId || p.name, p.score || 0])));
     setScreen("game");
   }
 
@@ -294,6 +296,7 @@ export default function HalfItScoreboard() {
     setPlayerIndex(0);
     setScoreInput("");
     setLastAction(null);
+    setRoundStartScores(Object.fromEntries(players.map(p => [p.profileId || p.name, p.score || 0])));
     setScreen("game");
   }
 
@@ -324,7 +327,11 @@ export default function HalfItScoreboard() {
       setScoreInput("");
       return;
     }
-    finishGame(updatedPlayers);
+    if (gameMode === "multiplayer") {
+      setRoundSummary(true);
+    } else {
+      finishGame(updatedPlayers);
+    }
     setScoreInput("");
   }
 
@@ -332,6 +339,7 @@ export default function HalfItScoreboard() {
     const nextIndex = roundIndex + 1;
     if (nextIndex >= ROUNDS.length) return;
     setRoundSummary(false);
+    setRoundStartScores(Object.fromEntries(players.map(p => [p.profileId || p.name, p.score || 0])));
     setRoundTransition({ index: nextIndex, name: ROUNDS[nextIndex].name });
     setTimeout(() => {
       setRoundIndex(nextIndex);
@@ -425,6 +433,8 @@ export default function HalfItScoreboard() {
         name:p.name,
         guest:Boolean(p.guest),
         score:p.score,
+        halfIts:(p.history || []).filter(h => h.half).length,
+        bestRound:Math.max(0, ...(p.history || []).filter(h => !h.half).map(h => h.delta || 0)),
         won:gameMode === "multiplayer" && p.score === topScore
       })) };
     saveGame(record); setPlayers(finalPlayers); localStorage.removeItem(ACTIVE_GAME_KEY); setSavedActiveGame(null); setScreen("results");
@@ -435,7 +445,25 @@ export default function HalfItScoreboard() {
     setRoundIndex(0);
     setPlayerIndex(0);
     setScoreInput("");
+    setRoundStartScores(Object.fromEntries(players.map(p => [p.profileId || p.name, 0])));
+    setLastAction(null);
+    setRoundSummary(false);
     setScreen("game");
+  }
+
+  function randomizePlayers() {
+    setPlayers(current => {
+      const shuffled = [...current];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      return shuffled;
+    });
+  }
+
+  function changePlayers() {
+    beginSetup(gameMode);
   }
 
   function keypadPress(value) {
@@ -511,6 +539,28 @@ export default function HalfItScoreboard() {
   const next = players.length > 1 ? players[(playerIndex + 1) % players.length] : null;
   const round = ROUNDS[roundIndex];
   const canStart = gameMode === "solo" ? players.length === 1 : players.length >= 2;
+
+  const defendingChampion = useMemo(() => {
+    const games = (allGames || []).filter(g => g.mode === "multiplayer").sort((a,b) => new Date(b.date) - new Date(a.date));
+    return games[0]?.players?.find(p => p.won) || null;
+  }, [allGames]);
+
+  const isDefendingChampion = (p) => Boolean(defendingChampion && (
+    (p.profileId && defendingChampion.profileId === p.profileId) ||
+    (!p.profileId && !defendingChampion.profileId && defendingChampion.name?.toLowerCase() === p.name?.toLowerCase())
+  ));
+
+  const roundStandingRows = useMemo(() => {
+    const currentSorted = [...players].sort((a,b) => b.score - a.score);
+    const beforeSorted = [...players].sort((a,b) => {
+      const ak = a.profileId || a.name, bk = b.profileId || b.name;
+      return (roundStartScores[bk] ?? 0) - (roundStartScores[ak] ?? 0);
+    });
+    return currentSorted.map((p, i) => {
+      const oldIndex = beforeSorted.findIndex(x => (x.profileId || x.name) === (p.profileId || p.name));
+      return { p, rank: i + 1, move: oldIndex - i };
+    });
+  }, [players, roundStartScores]);
 
   return (
     <div className={`app ${screen === "game" ? "app-game" : ""}`}>
@@ -628,7 +678,7 @@ export default function HalfItScoreboard() {
         .half-btn { width:100%; margin-top:11px; min-height:58px; border-radius:12px; border:2px solid var(--red); background:transparent; color:var(--red); font-family:'Oswald',sans-serif; font-size:19px; font-weight:700; font-style:italic; text-transform:uppercase; cursor:pointer; }
 
         .results-list { display:flex; flex-direction:column; gap:8px; margin:16px 0; }
-        .result-row { border:1px solid var(--line); border-radius:11px; padding:12px 14px; display:flex; align-items:center; gap:12px; background:rgba(255,255,255,.02); }
+        .result-row { flex-wrap:wrap; border:1px solid var(--line); border-radius:11px; padding:12px 14px; display:flex; align-items:center; gap:12px; background:rgba(255,255,255,.02); }
         .result-row.winner { border-color:var(--lime); }
         .rank { width:24px; color:var(--muted); font-family:'IBM Plex Mono',monospace; }
         .result-name { flex:1; }
@@ -686,6 +736,22 @@ export default function HalfItScoreboard() {
         .profile-pick-copy small, .profile-row-copy small, .profile-preview small, .profile-stats-head small { color:var(--muted); margin-top:2px; font-size:11px; }
         .profile-check { color:var(--lime); font-size:20px; font-weight:700; }
         .profile-create-inline { margin-top:10px; min-height:46px; }
+
+        .round-strip { display:flex; gap:6px; overflow-x:auto; scrollbar-width:none; margin:-2px 0 10px; padding:2px 1px 5px; }
+        .round-strip::-webkit-scrollbar { display:none; }
+        .round-pill { flex:0 0 auto; min-width:34px; height:28px; padding:0 8px; border-radius:999px; border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--muted); background:rgba(255,255,255,.025); }
+        .round-pill.done { color:#779086; border-color:#2f4940; opacity:.72; }
+        .round-pill.current { color:#07120d; background:var(--lime); border-color:var(--lime); font-weight:800; box-shadow:0 0 14px rgba(136,255,59,.24); }
+        .summary-next { margin:14px 0 4px; padding:12px; border:1px solid rgba(136,255,59,.25); border-radius:12px; background:rgba(136,255,59,.055); text-align:center; }
+        .summary-next .label { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.1em; }
+        .summary-next .target { color:var(--lime); font-family:'Oswald',sans-serif; font-size:30px; font-weight:700; text-transform:uppercase; margin-top:2px; }
+        .move { display:inline-block; min-width:22px; margin-left:7px; font-size:12px; font-weight:800; }
+        .move.up { color:var(--lime); } .move.down { color:var(--red); } .move.same { color:var(--muted); }
+        .setup-tools { display:flex; justify-content:flex-end; margin:-2px 0 8px; }
+        .random-btn { border:1px solid var(--line); color:var(--cyan); background:transparent; border-radius:9px; padding:7px 10px; font-size:11px; font-weight:700; cursor:pointer; }
+        .champ-crown { margin-left:6px; font-size:14px; }
+        .result-meta { width:100%; padding-left:34px; display:flex; gap:12px; color:var(--muted); font-size:10px; margin-top:3px; }
+        .rematch-note { color:var(--muted); font-size:11px; text-align:center; margin-top:-2px; }
         .guest-divider { display:flex; align-items:center; gap:10px; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.08em; margin:17px 0 10px; }
         .guest-divider:before,.guest-divider:after { content:''; height:1px; background:var(--line); flex:1; }
         .player-chip em { font-style:normal; color:var(--muted); font-size:9px; text-transform:uppercase; margin-left:6px; border:1px solid var(--line); border-radius:999px; padding:2px 5px; }
@@ -893,9 +959,10 @@ export default function HalfItScoreboard() {
 
           {players.length > 0 && <div className="selected-players">
             <div className="section-title" style={{marginTop:14}}>Throwing Order</div>
+            {gameMode === "multiplayer" && players.length > 1 && <div className="setup-tools"><button className="random-btn" onClick={randomizePlayers}>🎲 Randomise order</button></div>}
             {players.map((p, i) => (
               <div className="player-chip" key={`${p.profileId || p.name}-${i}`}>
-                <span><b>{i + 1}.</b> {p.name} {p.guest && <em>Guest</em>}</span>
+                <span><b>{i + 1}.</b> {p.name}{isDefendingChampion(p) && <span className="champ-crown" title="Defending champion">👑</span>} {p.guest && <em>Guest</em>}</span>
                 <button onClick={() => removePlayer(i)}><X size={16} /></button>
               </div>
             ))}
@@ -911,6 +978,9 @@ export default function HalfItScoreboard() {
 
       {screen === "game" && current && (
         <div>
+          <div className="round-strip" aria-label="Round progress">
+            {ROUNDS.map((r,i) => <div key={r.name} className={`round-pill ${i < roundIndex ? "done" : i === roundIndex ? "current" : ""}`}>{i < roundIndex ? "✓" : ""}{r.name === "Triples" ? "T" : r.name === "Doubles" ? "D" : r.name === "3 Colours" ? "C" : r.name === "Bulls" ? "B" : r.name}</div>)}
+          </div>
           <div className="round-top">
             <div>
               <h2 className="round-name">{round.name}</h2>
@@ -922,7 +992,7 @@ export default function HalfItScoreboard() {
           <div className={`now-card ${flash && flash.i === playerIndex ? (flash.type === "score" ? "flash-score" : "flash-half") : ""}`}>
             <div className="now-label">Now Throwing</div>
             <div className="now-row">
-              <div className="now-name">{current.name}</div>
+              <div className="now-name">{current.name}{isDefendingChampion(current) && <span className="champ-crown" title="Defending champion">👑</span>}</div>
               <div className="now-score">{current.score}</div>
             </div>
             {scoreAnimation && <div className={`score-pop ${scoreAnimation.type === "half" ? "half" : ""}`}>{scoreAnimation.text}</div>}
@@ -953,8 +1023,15 @@ export default function HalfItScoreboard() {
           {roundSummary && gameMode === "multiplayer" ? (
             <div className="summary">
               <h3>Round {roundIndex + 1} Complete</h3>
-              {[...players].sort((a,b)=>b.score-a.score).map((p,i)=><div className="summary-row" key={p.name}><span>{i+1}. {p.name}</span><strong>{p.score}</strong></div>)}
-              <button className="btn btn-lime" style={{marginTop:12}} onClick={beginNextRound}>Next Round <ChevronRight size={17}/></button>
+              {roundStandingRows.map(({p,rank,move}) => <div className="summary-row" key={p.profileId || p.name}><span>{rank}. {p.name}{isDefendingChampion(p) && <span className="champ-crown">👑</span>}<span className={`move ${move > 0 ? "up" : move < 0 ? "down" : "same"}`}>{move > 0 ? `↑${move}` : move < 0 ? `↓${Math.abs(move)}` : "—"}</span></span><strong>{p.score}</strong></div>)}
+              {roundIndex + 1 < ROUNDS.length ? (
+                <>
+                  <div className="summary-next"><div className="label">Next Target · Round {roundIndex + 2}</div><div className="target">{ROUNDS[roundIndex + 1].name}</div></div>
+                  <button className="btn btn-lime" style={{marginTop:12}} onClick={beginNextRound}>Start Round {roundIndex + 2} <ChevronRight size={17}/></button>
+                </>
+              ) : (
+                <button className="btn btn-lime" style={{marginTop:12}} onClick={() => finishGame(players)}>View Final Results <Trophy size={17}/></button>
+              )}
             </div>
           ) : round.kind === "fixed" ? (
             <div className="fixed-score-panel">
@@ -1024,12 +1101,14 @@ export default function HalfItScoreboard() {
                 <span className="rank">{i + 1}</span>
                 <span className="result-name">{gameMode === "multiplayer" && i === 0 && <Trophy size={14} color="var(--lime)" style={{ marginRight: 6, verticalAlign: -2 }} />}{p.name}{resultAwards[p.profileId || p.name]?.personalBest && <span className="pb-badge">★ Personal Best</span>}{resultAwards[p.profileId || p.name]?.allTime && <span className="pb-badge">⚡ All-Time #1</span>}</span>
                 <span className="score">{p.score}</span>
+                <div className="result-meta"><span>Half Its: {(p.history || []).filter(h => h.half).length}</span><span>Best round: +{Math.max(0, ...(p.history || []).filter(h => !h.half).map(h => h.delta || 0))}</span></div>
               </div>
             ))}
           </div>
 
           <div className="btn-stack">
-            <button className="btn btn-lime" onClick={playAgain}><RotateCcw size={17} /> Play Again</button>
+            <button className="btn btn-lime" onClick={playAgain}><RotateCcw size={17} /> {gameMode === "multiplayer" ? "Quick Rematch — Same Players" : "Practice Again"}</button>
+            {gameMode === "multiplayer" && <button className="btn btn-outline" onClick={changePlayers}><Users size={17}/> Change Players</button>}
             {gameMode === "solo" ? (
               <button className="btn btn-outline" onClick={() => { setStatsName(players[0]?.name || ""); setStatsProfileId(players[0]?.profileId || null); setScreen("personal"); }}><BarChart2 size={17} /> View My Scores</button>
             ) : (
