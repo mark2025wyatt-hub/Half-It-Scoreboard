@@ -141,6 +141,37 @@ export default function HalfItScoreboard() {
   const [draggingIndex, setDraggingIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const touchDragIndexRef = useRef(null);
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [isInstalledApp, setIsInstalledApp] = useState(false);
+
+
+  useEffect(() => {
+    const standalone = window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+    setIsInstalledApp(Boolean(standalone));
+    const onBeforeInstall = (event) => {
+      event.preventDefault();
+      setInstallPrompt(event);
+    };
+    const onInstalled = () => {
+      setInstallPrompt(null);
+      setIsInstalledApp(true);
+    };
+    window.addEventListener("beforeinstallprompt", onBeforeInstall);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+
+  async function installApp() {
+    if (!installPrompt) return;
+    try {
+      await installPrompt.prompt();
+      await installPrompt.userChoice;
+    } catch {}
+    setInstallPrompt(null);
+  }
 
   useEffect(() => {
     loadGames();
@@ -819,6 +850,13 @@ export default function HalfItScoreboard() {
         .lb-date { color:var(--muted); font-size:10px; }
         .lb-score { font-family:'IBM Plex Mono',monospace; font-weight:700; font-size:17px; }
         .empty-note { text-align:center; color:var(--muted); font-size:13px; padding:24px 8px; }
+        .install-panel { display:flex; align-items:center; gap:14px; justify-content:space-between; }
+        .install-panel > div { flex:1; }
+        .install-btn { width:auto; min-width:112px; padding-left:16px; padding-right:16px; }
+        @media (max-width: 430px) {
+          .install-panel { align-items:stretch; flex-direction:column; }
+          .install-btn { width:100%; }
+        }
         .shared-note { text-align:center; color:var(--muted); font-size:11px; margin-top:12px; line-height:1.45; }
         .up-next-score { margin-left:auto; color:var(--text); font-family:'IBM Plex Mono',monospace; font-weight:700; }
         .all-scores { margin-top:8px; border:1px solid var(--line); border-radius:10px; background:rgba(255,255,255,.015); }
@@ -1079,6 +1117,15 @@ export default function HalfItScoreboard() {
               <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 20, marginBottom: 4 }}>Round {(savedActiveGame.roundIndex || 0) + 1} of {ROUNDS.length} · {ROUNDS[savedActiveGame.roundIndex || 0]?.name}</div>
               <div className="muted small" style={{ marginBottom: 12 }}>{savedActiveGame.roundSummary ? "Round complete — standings ready" : `${savedActiveGame.players[savedActiveGame.playerIndex || 0]?.name || "Player"}'s turn`}</div>
               <button className="btn btn-lime" onClick={resumeSavedGame}>Resume Game <ChevronRight size={18} /></button>
+            </div>
+          )}
+          {installPrompt && !isInstalledApp && (
+            <div className="panel install-panel" style={{ marginBottom: 16 }}>
+              <div>
+                <div className="panel-title" style={{ color: "var(--cyan)", marginBottom: 4 }}>Install Half It</div>
+                <div className="muted small">Add it to your home screen and open it like a standalone darts app.</div>
+              </div>
+              <button className="btn btn-cyan install-btn" onClick={installApp}>Install App</button>
             </div>
           )}
           <div className="btn-stack">
