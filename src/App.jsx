@@ -101,27 +101,25 @@ export default function HalfItScoreboard() {
   const [roundTransition, setRoundTransition] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [resultAwards, setResultAwards] = useState({});
+  const [savedActiveGame, setSavedActiveGame] = useState(null);
 
   useEffect(() => {
     loadGames();
     try {
       const saved = JSON.parse(localStorage.getItem(ACTIVE_GAME_KEY) || "null");
       if (saved?.players?.length && saved.roundIndex < ROUNDS.length) {
-        setGameMode(saved.gameMode || "multiplayer");
-        setPlayers(saved.players);
-        setRoundIndex(saved.roundIndex || 0);
-        setPlayerIndex(saved.playerIndex || 0);
-        setScoreInput(saved.scoreInput || "");
-        setScreen("game");
+        setSavedActiveGame(saved);
       }
     } catch {}
   }, []);
 
   useEffect(() => {
     if (screen === "game" && players.length) {
-      localStorage.setItem(ACTIVE_GAME_KEY, JSON.stringify({ gameMode, players, roundIndex, playerIndex, scoreInput }));
+      const snapshot = { gameMode, players, roundIndex, playerIndex, scoreInput, roundSummary, lastAction };
+      localStorage.setItem(ACTIVE_GAME_KEY, JSON.stringify(snapshot));
+      setSavedActiveGame(snapshot);
     }
-  }, [screen, gameMode, players, roundIndex, playerIndex, scoreInput]);
+  }, [screen, gameMode, players, roundIndex, playerIndex, scoreInput, roundSummary, lastAction]);
 
   useEffect(() => {
     let lock;
@@ -159,6 +157,25 @@ export default function HalfItScoreboard() {
       setStorageError(true);
     }
     setSavingGame(false);
+  }
+
+  function resumeSavedGame() {
+    if (!savedActiveGame?.players?.length) return;
+    setGameMode(savedActiveGame.gameMode || "multiplayer");
+    setPlayers(savedActiveGame.players);
+    setRoundIndex(savedActiveGame.roundIndex || 0);
+    setPlayerIndex(savedActiveGame.playerIndex || 0);
+    setScoreInput(savedActiveGame.scoreInput || "");
+    setRoundSummary(Boolean(savedActiveGame.roundSummary));
+    setLastAction(savedActiveGame.lastAction || null);
+    setScreen("game");
+  }
+
+  function startFreshSetup(mode) {
+    if (savedActiveGame?.players?.length && !confirm("Start a new game? Your current game is still in progress and will be replaced.")) return;
+    localStorage.removeItem(ACTIVE_GAME_KEY);
+    setSavedActiveGame(null);
+    beginSetup(mode);
   }
 
   function beginSetup(mode) {
@@ -311,7 +328,7 @@ export default function HalfItScoreboard() {
     setResultAwards(awards);
     const record = { id: `g${Date.now()}`, date: new Date().toISOString(), mode: gameMode,
       players: ranked.map(p => ({ name:p.name, score:p.score, won:gameMode === "multiplayer" && p.score === topScore })) };
-    saveGame(record); setPlayers(finalPlayers); localStorage.removeItem(ACTIVE_GAME_KEY); setScreen("results");
+    saveGame(record); setPlayers(finalPlayers); localStorage.removeItem(ACTIVE_GAME_KEY); setSavedActiveGame(null); setScreen("results");
   }
 
   function playAgain() {
@@ -625,7 +642,7 @@ export default function HalfItScoreboard() {
             <button className="icon-btn" onClick={() => setMenuOpen(v => !v)} title="Game menu"><Menu size={18} /></button>
             {menuOpen && <div className="game-menu">
               <button onClick={() => { setMenuOpen(false); setScreen("leaderboard"); }}>Leaderboard</button>
-              <button className="danger" onClick={() => { if (confirm("Start a new game? Your current game will be lost.")) { localStorage.removeItem(ACTIVE_GAME_KEY); setMenuOpen(false); setScreen("home"); setPlayers([]); } }}>Start New Game</button>
+              <button className="danger" onClick={() => { if (confirm("Start a new game? Your current game will be lost.")) { localStorage.removeItem(ACTIVE_GAME_KEY); setSavedActiveGame(null); setMenuOpen(false); setScreen("home"); setPlayers([]); } }}>Start New Game</button>
             </div>}
           </div> : <>
             <button className="icon-btn" onClick={() => setScreen("leaderboard")} title="Leaderboard"><Trophy size={17} /></button>
@@ -649,9 +666,17 @@ export default function HalfItScoreboard() {
             <h1>Half It<span>.</span></h1>
             <p>15 rounds. Hit the target to build your score. Miss it and your total gets cut in half.</p>
           </div>
+          {savedActiveGame?.players?.length && (
+            <div className="panel" style={{ borderColor: "var(--lime)", marginBottom: 16 }}>
+              <div className="panel-title" style={{ color: "var(--lime)" }}>Game in progress</div>
+              <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 20, marginBottom: 4 }}>Round {(savedActiveGame.roundIndex || 0) + 1} of {ROUNDS.length} · {ROUNDS[savedActiveGame.roundIndex || 0]?.name}</div>
+              <div className="muted small" style={{ marginBottom: 12 }}>{savedActiveGame.roundSummary ? "Round complete — standings ready" : `${savedActiveGame.players[savedActiveGame.playerIndex || 0]?.name || "Player"}'s turn`}</div>
+              <button className="btn btn-lime" onClick={resumeSavedGame}>Resume Game <ChevronRight size={18} /></button>
+            </div>
+          )}
           <div className="btn-stack">
-            <button className="btn btn-lime" onClick={() => beginSetup("multiplayer")}><Users size={18} /> Multiplayer Game</button>
-            <button className="btn btn-cyan" onClick={() => beginSetup("solo")}><Target size={18} /> Solo Practice</button>
+            <button className="btn btn-lime" onClick={() => startFreshSetup("multiplayer")}><Users size={18} /> Multiplayer Game</button>
+            <button className="btn btn-cyan" onClick={() => startFreshSetup("solo")}><Target size={18} /> Solo Practice</button>
             <button className="btn btn-outline" onClick={() => setScreen("leaderboard")}><Trophy size={18} /> Leaderboard</button>
             <button className="btn btn-outline" onClick={() => setScreen("personal")}><BarChart2 size={18} /> My Scores</button>
           </div>
