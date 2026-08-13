@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { loadGameRecords, saveGameRecord, loadProfiles, createProfile, usingSharedDatabase } from "./data";
+import { loadGameRecords, saveGameRecord, loadProfiles, createProfile, usingSharedDatabase, getAdminStatus, signInAdmin, signOutAdmin, updateGamePlayers, deleteGameRecord, updateProfileRecord, deleteProfileRecord, loadAdminAudit, logAdminAction } from "./data";
 import {
   Target,
   Trophy,
@@ -22,6 +22,12 @@ import {
   UserRound,
   Zap,
   Medal,
+  Shield,
+  LogOut,
+  Trash2,
+  Pencil,
+  History,
+  Save,
 } from "lucide-react";
 
 const ACTIVE_GAME_KEY = "half-it-active-game-v1";
@@ -144,6 +150,14 @@ export default function HalfItScoreboard() {
   const touchDragIndexRef = useRef(null);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [isInstalledApp, setIsInstalledApp] = useState(false);
+  const [adminSession, setAdminSession] = useState(null);
+  const [adminRole, setAdminRole] = useState(null);
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminError, setAdminError] = useState("");
+  const [adminBusy, setAdminBusy] = useState(false);
+  const [adminTab, setAdminTab] = useState("games");
+  const [adminAudit, setAdminAudit] = useState([]);
 
 
   useEffect(() => {
@@ -177,6 +191,7 @@ export default function HalfItScoreboard() {
   useEffect(() => {
     loadGames();
     loadPlayerProfiles();
+    refreshAdminStatus();
     try {
       const saved = JSON.parse(localStorage.getItem(ACTIVE_GAME_KEY) || "null");
       if (saved?.players?.length && saved.roundIndex < ROUNDS.length) {
@@ -275,6 +290,152 @@ export default function HalfItScoreboard() {
     setStatsName(profile.displayName);
     setStatsFilter("all");
     setScreen("personal");
+  }
+
+  async function refreshAdminStatus() {
+    if (!usingSharedDatabase) { setAdminSession(null); setAdminRole(null); return false; }
+    try {
+      const status = await getAdminStatus();
+      setAdminSession(status.session);
+      setAdminRole(status.isAdmin ? status.role : null);
+      return Boolean(status.isAdmin);
+    } catch {
+      setAdminSession(null); setAdminRole(null); return false;
+    }
+  }
+
+  async function openAdmin() {
+    const ok = await refreshAdminStatus();
+    setAdminError("");
+    if (ok) { await refreshAdminAudit(); setScreen("admin"); }
+    else setScreen("adminLogin");
+  }
+
+  async function handleAdminLogin(e) {
+    e?.preventDefault?.();
+    if (!adminEmail.trim() || !adminPassword) { setAdminError("Enter your moderator email and password."); return; }
+    setAdminBusy(true); setAdminError("");
+    try {
+      const status = await signInAdmin(adminEmail.trim(), adminPassword);
+      setAdminSession(status.session); setAdminRole(status.role || "moderator"); setAdminPassword("");
+      await Promise.all([loadGames(), loadPlayerProfiles(), refreshAdminAudit()]);
+      setScreen("admin");
+    } catch (err) { setAdminError(err?.message || "Moderator login failed."); }
+    setAdminBusy(false);
+  }
+
+  async function handleAdminLogout() {
+    try { await signOutAdmin(); } catch {}
+    setAdminSession(null); setAdminRole(null); setAdminPassword(""); setAdminAudit([]); setScreen("home");
+  }
+
+  async function refreshAdminAudit() {
+    try { setAdminAudit(await loadAdminAudit()); } catch { setAdminAudit([]); }
+  }
+
+  function recomputeWinners(game, nextPlayers) {
+    if (game.mode !== "multiplayer") return nextPlayers.map(p => ({ ...p, won:false }));
+    const top = Math.max(...nextPlayers.map(p => Number(p.score) || 0));
+    return nextPlayers.map(p => ({ ...p, won:(Number(p.score) || 0) === top }));
+  }
+
+  async function adminEditScore(game, playerIndexToEdit) {
+    const player = game.players[playerIndexToEdit];
+    const raw = prompt(`New score for ${player.name}`, String(player.score));
+    if (raw === null) return;
+    const score = Number(raw);
+    if (!Number.isFinite(score) || score < 0 || !Number.isInteger(score)) { alert("Enter a whole number of 0 or more."); return; }
+    setAdminBusy(true);
+    try {
+      const next = game.players.map((p,i) => i===playerIndexToEdit ? {...p,score} : {...p});
+      const recalculated = recomputeWinners(game,next);
+      await updateGamePlayers(game.id,recalculated);
+      await logAdminAction("edit_score",{gameId:game.id,player:player.name,from:player.score,to:score});
+      await Promise.all([loadGames(),refreshAdminAudit()]);
+    } catch (err) { alert(err?.message || "Score could not be updated."); }
+    setAdminBusy(false);
+  }
+
+  async function adminRemoveResult(game, playerIndexToRemove) {
+    const player = game.players[playerIndexToRemove];
+    const wouldDeleteGame = game.mode === "solo" || game.players.length <= 2;
+    const msg = wouldDeleteGame
+      ? `Removing ${player.name}'s result would leave this game invalid, so the entire game will be deleted. Continue?`
+      : `Remove ${player.name}'s result from this game? Their averages, PB and leaderboard stats will recalculate automatically.`;
+    if (!confirm(msg)) return;
+    setAdminBusy(true);
+    try {
+      if (wouldDeleteGame) await deleteGameRecord(game.id);
+      else {
+        const next = recomputeWinners(game, game.players.filter((_,i)=>i!==playerIndexToRemove));
+        await updateGamePlayers(game.id,next);
+      }
+      await logAdminAction("remove_result",{gameId:game.id,player:player.name,deletedGame:wouldDeleteGame});
+      await Promise.all([loadGames(),refreshAdminAudit()]);
+    } catch (err) { alert(err?.message || "Result could not be removed."); }
+    setAdminBusy(false);
+  }
+
+  async function adminDeleteGame(game) {
+    if (!confirm(`Delete this ${game.mode} game from ${new Date(game.date).toLocaleString()}? This cannot be undone.`)) return;
+    setAdminBusy(true);
+    try {
+      await deleteGameRecord(game.id);
+      await logAdminAction("delete_game",{gameId:game.id,mode:game.mode,date:game.date,players:game.players.map(p=>p.name)});
+      await Promise.all([loadGames(),refreshAdminAudit()]);
+    } catch (err) { alert(err?.message || "Game could not be deleted."); }
+    setAdminBusy(false);
+  }
+
+  async function adminEditProfile(profile) {
+    const displayName = prompt("Display name", profile.displayName);
+    if (displayName === null) return;
+    const trimmed = displayName.trim();
+    if (!trimmed) { alert("Display name cannot be empty."); return; }
+    const nickname = prompt("Nickname (optional)", profile.nickname || "");
+    if (nickname === null) return;
+    setAdminBusy(true);
+    try {
+      await updateProfileRecord(profile.id,{displayName:trimmed,nickname:nickname.trim()});
+      await logAdminAction("edit_profile",{profileId:profile.id,from:profile.displayName,to:trimmed});
+      await Promise.all([loadPlayerProfiles(),refreshAdminAudit()]);
+    } catch (err) { alert(err?.message || "Profile could not be updated."); }
+    setAdminBusy(false);
+  }
+
+  async function resetProfileHistory(profile) {
+    if (!confirm(`Reset ALL tracked scores for ${profile.displayName}? Their profile will remain, but solo and multiplayer history will be removed.`)) return;
+    if (!confirm("This will recalculate leaderboards, averages, wins and personal bests. Continue?")) return;
+    setAdminBusy(true);
+    try {
+      const affected = (allGames || []).filter(g => g.players?.some(p => p.profileId === profile.id));
+      for (const game of affected) {
+        const remaining = game.players.filter(p => p.profileId !== profile.id);
+        if (game.mode === "solo" || (game.mode === "multiplayer" && remaining.length < 2)) await deleteGameRecord(game.id);
+        else await updateGamePlayers(game.id,recomputeWinners(game,remaining));
+      }
+      await logAdminAction("reset_profile_history",{profileId:profile.id,player:profile.displayName,gamesAffected:affected.length});
+      await Promise.all([loadGames(),refreshAdminAudit()]);
+    } catch (err) { alert(err?.message || "Player history could not be reset."); }
+    setAdminBusy(false);
+  }
+
+  async function adminDeleteProfile(profile) {
+    const typed = prompt(`Delete ${profile.displayName}'s profile AND all linked history? Type DELETE to confirm.`);
+    if (typed !== "DELETE") return;
+    setAdminBusy(true);
+    try {
+      const affected = (allGames || []).filter(g => g.players?.some(p => p.profileId === profile.id));
+      for (const game of affected) {
+        const remaining = game.players.filter(p => p.profileId !== profile.id);
+        if (game.mode === "solo" || (game.mode === "multiplayer" && remaining.length < 2)) await deleteGameRecord(game.id);
+        else await updateGamePlayers(game.id,recomputeWinners(game,remaining));
+      }
+      await deleteProfileRecord(profile.id);
+      await logAdminAction("delete_profile",{profileId:profile.id,player:profile.displayName,gamesAffected:affected.length});
+      await Promise.all([loadGames(),loadPlayerProfiles(),refreshAdminAudit()]);
+    } catch (err) { alert(err?.message || "Profile could not be deleted."); }
+    setAdminBusy(false);
   }
 
   async function loadGames() {
@@ -935,6 +1096,31 @@ export default function HalfItScoreboard() {
         .game-menu { position:absolute; right:0; top:42px; z-index:20; min-width:180px; border:1px solid var(--line); background:#07131e; border-radius:10px; padding:7px; box-shadow:0 14px 35px rgba(0,0,0,.4); }
         .game-menu button { width:100%; padding:10px; border:0; background:transparent; color:var(--text); text-align:left; cursor:pointer; }
         .game-menu .danger { color:var(--red); }
+        .admin-login-card { max-width:420px; margin:24px auto 0; }
+        .admin-login-card .shield-mark { width:64px; height:64px; margin:0 auto 14px; border:1px solid rgba(140,240,0,.55); border-radius:18px; display:grid; place-items:center; color:var(--lime); background:rgba(140,240,0,.06); }
+        .admin-tabs { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; margin:14px 0; }
+        .admin-tabs button { min-height:42px; border:1px solid var(--line); border-radius:10px; background:#07131e; color:var(--muted); font-family:'Oswald',sans-serif; text-transform:uppercase; font-weight:700; cursor:pointer; }
+        .admin-tabs button.active { color:#06121d; background:var(--lime); border-color:var(--lime); }
+        .admin-game { border:1px solid var(--line); border-radius:13px; background:rgba(11,28,42,.9); margin-bottom:12px; overflow:hidden; }
+        .admin-game-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 13px; border-bottom:1px solid var(--line); }
+        .admin-game-head strong { font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:.04em; }
+        .admin-player-row { display:grid; grid-template-columns:1fr auto auto; gap:8px; align-items:center; padding:10px 13px; border-bottom:1px solid rgba(34,56,74,.55); }
+        .admin-player-row:last-child { border-bottom:0; }
+        .admin-player-score { font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:700; }
+        .admin-actions { display:flex; gap:6px; }
+        .admin-mini { border:1px solid var(--line); background:#07131e; color:var(--text); border-radius:8px; min-width:34px; height:34px; display:grid; place-items:center; cursor:pointer; }
+        .admin-mini.danger { color:var(--red); border-color:rgba(255,59,59,.45); }
+        .admin-profile { display:flex; gap:10px; align-items:center; padding:11px 0; border-bottom:1px solid var(--line); }
+        .admin-profile:last-child { border-bottom:0; }
+        .admin-profile-copy { flex:1; min-width:0; }
+        .admin-profile-copy strong { display:block; }
+        .admin-profile-actions { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+        .admin-chip { border:1px solid var(--line); border-radius:8px; background:#07131e; color:var(--text); padding:7px 9px; font-size:11px; cursor:pointer; }
+        .admin-chip.danger { color:var(--red); border-color:rgba(255,59,59,.45); }
+        .audit-row { padding:10px 0; border-bottom:1px solid var(--line); }
+        .audit-row:last-child { border-bottom:0; }
+        .audit-action { font-family:'Oswald',sans-serif; text-transform:uppercase; color:var(--lime); font-size:13px; }
+        .audit-details { color:var(--muted); font-size:11px; margin-top:3px; overflow-wrap:anywhere; }
         .filter-tabs { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:14px; }
         .filter-tab { padding:9px 5px; border-radius:9px; border:1px solid var(--line); background:transparent; color:var(--muted); font-size:11px; cursor:pointer; }
         .filter-tab.active { border-color:var(--lime); color:var(--lime); background:rgba(140,240,0,.06); }
@@ -1132,7 +1318,7 @@ export default function HalfItScoreboard() {
 
       <div className="nav">
         <div className="brand" onClick={() => setScreen("home")}>
-          <img className="brand-app-icon" src="/branding/half-it-icon.png" alt="Half It" />
+          <img className="brand-app-icon" src="/icons/icon-192.png" alt="Half It" />
           <h1>Half It</h1>
         </div>
         <div className="nav-btns">
@@ -1140,12 +1326,14 @@ export default function HalfItScoreboard() {
             <button className="icon-btn" onClick={() => setMenuOpen(v => !v)} title="Game menu"><Menu size={18} /></button>
             {menuOpen && <div className="game-menu">
               <button onClick={() => { setMenuOpen(false); setScreen("leaderboard"); }}>Leaderboard</button>
+              <button onClick={() => { setMenuOpen(false); openAdmin(); }}>Admin / Moderator</button>
               <button className="danger" onClick={() => { if (confirm("Start a new game? Your current game will be lost.")) { localStorage.removeItem(ACTIVE_GAME_KEY); setSavedActiveGame(null); setMenuOpen(false); setScreen("home"); setPlayers([]); } }}>Start New Game</button>
             </div>}
           </div> : <>
             <button className="icon-btn" onClick={() => setScreen("leaderboard")} title="Leaderboard"><Trophy size={17} /></button>
             <button className="icon-btn" onClick={() => setScreen("players")} title="Players"><Users size={17} /></button>
             <button className="icon-btn" onClick={() => { setStatsProfileId(null); setScreen("personal"); }} title="My Scores"><BarChart2 size={17} /></button>
+            <button className="icon-btn" onClick={openAdmin} title="Admin / Moderator"><Shield size={17} /></button>
             <button className="icon-btn" onClick={() => setScreen("home")} title="Home"><Home size={17} /></button>
           </>}
         </div>
@@ -1161,7 +1349,7 @@ export default function HalfItScoreboard() {
       {screen === "home" && (
         <div>
           <div className="hero">
-            <img className="home-banner" src="/branding/half-it-banner.png" alt="Half It — Hit. Score. Don’t lose half." />
+            <img className="home-banner" src="/half-it-banner.png" alt="Half It — Hit. Score. Don’t lose half." />
           </div>
           {savedActiveGame?.players?.length && (
             <div className="panel" style={{ borderColor: "var(--lime)", marginBottom: 16 }}>
@@ -1188,6 +1376,98 @@ export default function HalfItScoreboard() {
             <button className="btn btn-outline" onClick={() => { setStatsProfileId(null); setScreen("personal"); }}><BarChart2 size={18} /> My Scores</button>
           </div>
           <p className="shared-note">Competitive leaderboard scores come only from games with 2 or more players. Solo practice stays in My Scores. {usingSharedDatabase ? "Shared database connected." : "Currently using this device only until Supabase is connected."}</p>
+        </div>
+      )}
+
+      {screen === "adminLogin" && (
+        <div>
+          <div className="admin-login-card panel">
+            <div className="shield-mark"><Shield size={30}/></div>
+            <div className="section-title" style={{justifyContent:"center"}}>Moderator Access</div>
+            <h2 className="setup-heading" style={{textAlign:"center"}}>Admin Login</h2>
+            <p className="muted small" style={{textAlign:"center",lineHeight:1.5}}>Sign in with an authorised Supabase moderator account. Admin tools are hidden from normal players.</p>
+            {!usingSharedDatabase && <div className="notice">Admin tools require the shared Supabase database.</div>}
+            <form onSubmit={handleAdminLogin}>
+              <label className="form-label">Email</label>
+              <input className="text-input full" type="email" autoComplete="username" value={adminEmail} onChange={e=>setAdminEmail(e.target.value)} placeholder="moderator@example.com"/>
+              <label className="form-label">Password</label>
+              <input className="text-input full" type="password" autoComplete="current-password" value={adminPassword} onChange={e=>setAdminPassword(e.target.value)} placeholder="••••••••"/>
+              {adminError && <div className="notice" style={{marginTop:12}}>{adminError}</div>}
+              <div className="btn-stack">
+                <button className="btn btn-lime" disabled={adminBusy || !usingSharedDatabase} type="submit"><Shield size={17}/> {adminBusy?"Signing In…":"Open Admin"}</button>
+                <button className="btn btn-outline" type="button" onClick={()=>setScreen("home")}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {screen === "admin" && adminRole && (
+        <div>
+          <div className="players-head">
+            <div>
+              <div className="section-title"><Shield size={15}/> Admin Dashboard</div>
+              <h2 className="setup-heading">Moderator Tools</h2>
+              <p className="muted small">Correct mistakes without manually changing averages or leaderboards. Stats recalculate from the underlying game history.</p>
+            </div>
+            <button className="icon-btn" onClick={handleAdminLogout} title="Sign out"><LogOut size={17}/></button>
+          </div>
+          <div className="mode-badge">Signed in · {adminSession?.user?.email || "Moderator"} · {adminRole}</div>
+          <div className="admin-tabs">
+            <button className={adminTab==="games"?"active":""} onClick={()=>setAdminTab("games")}>Games</button>
+            <button className={adminTab==="players"?"active":""} onClick={()=>setAdminTab("players")}>Players</button>
+            <button className={adminTab==="audit"?"active":""} onClick={()=>{setAdminTab("audit");refreshAdminAudit();}}>Activity</button>
+          </div>
+
+          {adminBusy && <div className="notice" style={{borderColor:"var(--lime)",background:"rgba(140,240,0,.06)"}}>Updating shared data…</div>}
+
+          {adminTab === "games" && <div>
+            <div className="section-title"><History size={14}/> Recent Games</div>
+            {!(allGames||[]).length && <p className="empty-note">No saved games yet.</p>}
+            {[...(allGames||[])].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,100).map(game=><div className="admin-game" key={game.id}>
+              <div className="admin-game-head">
+                <div><strong>{game.mode === "solo" ? "Solo Practice" : "Multiplayer"}</strong><div className="muted small">{new Date(game.date).toLocaleString()} · {game.id}</div></div>
+                <button className="admin-mini danger" disabled={adminBusy} onClick={()=>adminDeleteGame(game)} title="Delete game"><Trash2 size={15}/></button>
+              </div>
+              {(game.players||[]).map((player,i)=><div className="admin-player-row" key={`${game.id}-${i}`}>
+                <div><strong>{player.name}</strong><div className="muted small">{player.profileId?"Registered profile":"Guest / legacy"}{player.won?" · Winner":""}</div></div>
+                <div className="admin-player-score">{player.score}</div>
+                <div className="admin-actions">
+                  <button className="admin-mini" disabled={adminBusy} onClick={()=>adminEditScore(game,i)} title="Edit score"><Pencil size={14}/></button>
+                  <button className="admin-mini danger" disabled={adminBusy} onClick={()=>adminRemoveResult(game,i)} title="Remove result"><X size={14}/></button>
+                </div>
+              </div>)}
+            </div>)}
+          </div>}
+
+          {adminTab === "players" && <div>
+            <div className="section-title"><Users size={14}/> Manage Profiles</div>
+            <div className="panel">
+              {!profiles.length && <p className="empty-note">No registered profiles.</p>}
+              {profiles.map(profile=><div className="admin-profile" key={profile.id}>
+                <span className={`profile-avatar accent-${profile.accent||"lime"}`}>{avatarGlyph(profile.avatar)}</span>
+                <div className="admin-profile-copy"><strong>{profile.displayName}</strong><div className="muted small">{profile.nickname||"No nickname"}</div></div>
+                <div className="admin-profile-actions">
+                  <button className="admin-chip" disabled={adminBusy} onClick={()=>adminEditProfile(profile)}>Edit</button>
+                  <button className="admin-chip danger" disabled={adminBusy} onClick={()=>resetProfileHistory(profile)}>Reset Scores</button>
+                  <button className="admin-chip danger" disabled={adminBusy} onClick={()=>adminDeleteProfile(profile)}>Delete</button>
+                </div>
+              </div>)}
+            </div>
+            <p className="shared-note">Reset Scores keeps the profile but removes its linked solo and multiplayer history. Delete removes both the profile and linked history.</p>
+          </div>}
+
+          {adminTab === "audit" && <div>
+            <div className="section-title"><History size={14}/> Admin Activity</div>
+            <div className="panel">
+              {!adminAudit.length && <p className="empty-note">No moderator changes recorded yet.</p>}
+              {adminAudit.map(row=><div className="audit-row" key={row.id}>
+                <div className="audit-action">{String(row.action||"").replaceAll("_"," ")}</div>
+                <div className="muted small">{new Date(row.created_at).toLocaleString()}</div>
+                <div className="audit-details">{JSON.stringify(row.details||{})}</div>
+              </div>)}
+            </div>
+          </div>}
         </div>
       )}
 
