@@ -16,21 +16,21 @@ import {
 } from "lucide-react";
 
 const ROUNDS = [
-  { name: "20s", rule: "Only single, double or triple 20 count" },
-  { name: "19s", rule: "Only single, double or triple 19 count" },
-  { name: "Triples", rule: "Any triple counts, any number" },
-  { name: "18s", rule: "Only single, double or triple 18 count" },
-  { name: "17s", rule: "Only single, double or triple 17 count" },
-  { name: "45", rule: "Score exactly 45 with 3 darts, or it's a bust" },
-  { name: "16s", rule: "Only single, double or triple 16 count" },
-  { name: "15s", rule: "Only single, double or triple 15 count" },
-  { name: "Doubles", rule: "Any double counts, any number" },
-  { name: "13s", rule: "Only single, double or triple 13 count" },
-  { name: "12s", rule: "Only single, double or triple 12 count" },
-  { name: "3 Colours", rule: "Hit black, white, green & red — 3 of the 4, one per dart" },
-  { name: "11s", rule: "Only single, double or triple 11 count" },
-  { name: "10s", rule: "Only single, double or triple 10 count" },
-  { name: "Bulls", rule: "Outer bull = 25, inner bull = 50" },
+  { name: "20s", rule: "Enter 1–9 based on the number of scoring 20s hit", kind: "units", min: 1, max: 9, multiplier: 20 },
+  { name: "19s", rule: "Enter 1–9 based on the number of scoring 19s hit", kind: "units", min: 1, max: 9, multiplier: 19 },
+  { name: "Triples", rule: "Enter the points scored with triples", kind: "score", min: 1, max: 180 },
+  { name: "18s", rule: "Enter 1–9 based on the number of scoring 18s hit", kind: "units", min: 1, max: 9, multiplier: 18 },
+  { name: "17s", rule: "Enter 1–9 based on the number of scoring 17s hit", kind: "units", min: 1, max: 9, multiplier: 17 },
+  { name: "Doubles", rule: "Enter the points scored with doubles", kind: "score", min: 1, max: 120 },
+  { name: "16s", rule: "Enter 1–9 based on the number of scoring 16s hit", kind: "units", min: 1, max: 9, multiplier: 16 },
+  { name: "15s", rule: "Enter 1–9 based on the number of scoring 15s hit", kind: "units", min: 1, max: 9, multiplier: 15 },
+  { name: "45", rule: "Score exactly 45 with 3 darts, otherwise Half It", kind: "fixed", fixedPoints: 45 },
+  { name: "14s", rule: "Enter 1–9 based on the number of scoring 14s hit", kind: "units", min: 1, max: 9, multiplier: 14 },
+  { name: "13s", rule: "Enter 1–9 based on the number of scoring 13s hit", kind: "units", min: 1, max: 9, multiplier: 13 },
+  { name: "3 Colours", rule: "Enter the total score from the successful 3-colour visit (1–180)", kind: "score", min: 1, max: 180 },
+  { name: "12s", rule: "Enter 1–9 based on the number of scoring 12s hit", kind: "units", min: 1, max: 9, multiplier: 12 },
+  { name: "11s", rule: "Enter 1–9 based on the number of scoring 11s hit", kind: "units", min: 1, max: 9, multiplier: 11 },
+  { name: "Bulls", rule: "Enter 1–6 bull units; each unit is worth 25 points", kind: "units", min: 1, max: 6, multiplier: 25 },
 ];
 
 function polarToCartesian(cx, cy, r, angleDeg) {
@@ -165,15 +165,18 @@ export default function HalfItScoreboard() {
     setScoreInput("");
   }
 
-  function submitScore() {
-    const points = parseInt(scoreInput, 10);
-    if (Number.isNaN(points) || points < 0) return;
+  function addPoints(points, enteredValue = null) {
     const updated = players.map((p, i) =>
       i === playerIndex
         ? {
             ...p,
             score: p.score + points,
-            history: [...p.history, { round: ROUNDS[roundIndex].name, delta: points, half: false }],
+            history: [...p.history, {
+              round: ROUNDS[roundIndex].name,
+              delta: points,
+              half: false,
+              enteredValue,
+            }],
           }
         : p
     );
@@ -181,6 +184,27 @@ export default function HalfItScoreboard() {
     setFlash({ i: playerIndex, type: "score" });
     setTimeout(() => setFlash(null), 420);
     advanceTurn(updated);
+  }
+
+  function submitScore() {
+    const entered = parseInt(scoreInput, 10);
+    if (Number.isNaN(entered)) return;
+
+    if (round.kind === "units") {
+      if (entered < round.min || entered > round.max) return;
+      addPoints(entered * round.multiplier, entered);
+      return;
+    }
+
+    if (round.kind === "score") {
+      if (entered < round.min || entered > round.max) return;
+      addPoints(entered, entered);
+    }
+  }
+
+  function submitFixedScore() {
+    if (round.kind !== "fixed") return;
+    addPoints(round.fixedPoints, round.fixedPoints);
   }
 
   function halfIt() {
@@ -234,10 +258,20 @@ export default function HalfItScoreboard() {
       if (scoreInput !== "") submitScore();
       return;
     }
+
+    if (round.kind === "units") {
+      const numeric = Number(value);
+      if (numeric >= round.min && numeric <= round.max) setScoreInput(String(numeric));
+      return;
+    }
+
     setScoreInput((s) => {
-      if (s.length >= 4) return s;
-      if (s === "0") return String(value);
-      return `${s}${value}`;
+      const candidate = `${s}${value}`.replace(/^0+/, "");
+      if (!candidate) return "";
+      if (candidate.length > 3) return s;
+      const numeric = Number(candidate);
+      if (numeric > round.max) return s;
+      return candidate;
     });
   }
 
@@ -286,7 +320,7 @@ export default function HalfItScoreboard() {
   const canStart = gameMode === "solo" ? players.length === 1 : players.length >= 2;
 
   return (
-    <div className="app">
+    <div className={`app ${screen === "game" ? "app-game" : ""}`}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600;700&display=swap');
 
@@ -389,6 +423,10 @@ export default function HalfItScoreboard() {
 
         .score-display { margin-top:16px; min-height:60px; border:1px solid var(--line); border-radius:12px; background:#07131e; display:flex; align-items:center; justify-content:center; font-family:'IBM Plex Mono',monospace; font-size:28px; font-weight:700; color:var(--text); }
         .score-display.empty { color:#546676; font-size:15px; font-family:'Inter',sans-serif; font-weight:500; }
+        .score-conversion { min-height:20px; margin-top:7px; text-align:center; color:var(--lime); font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600; }
+        .fixed-score-panel { margin-top:16px; border:1px solid var(--line); border-radius:12px; padding:14px; background:#07131e; text-align:center; }
+        .fixed-score-copy { color:var(--muted); font-size:12px; margin-bottom:10px; }
+        .fixed-score-btn { width:100%; min-height:62px; border-radius:11px; border:1px solid var(--lime); background:linear-gradient(180deg,var(--lime-2),var(--lime)); color:#06121d; font-family:'Oswald',sans-serif; font-size:19px; font-weight:700; text-transform:uppercase; cursor:pointer; }
 
         .keypad { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; margin-top:11px; }
         .key { min-height:62px; border-radius:11px; border:1px solid #31485b; background:linear-gradient(180deg,#112536,#0a1926); color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:24px; font-weight:700; cursor:pointer; }
@@ -414,6 +452,79 @@ export default function HalfItScoreboard() {
         .lb-score { font-family:'IBM Plex Mono',monospace; font-weight:700; font-size:17px; }
         .empty-note { text-align:center; color:var(--muted); font-size:13px; padding:24px 8px; }
         .shared-note { text-align:center; color:var(--muted); font-size:11px; margin-top:12px; line-height:1.45; }
+        .up-next-score { margin-left:auto; color:var(--text); font-family:'IBM Plex Mono',monospace; font-weight:700; }
+        .all-scores { margin-top:8px; border:1px solid var(--line); border-radius:10px; background:rgba(255,255,255,.015); }
+        .all-scores summary { cursor:pointer; padding:8px 11px; color:var(--muted); font-size:11px; text-align:center; list-style:none; }
+        .all-scores summary::-webkit-details-marker { display:none; }
+        .all-scores[open] summary { border-bottom:1px solid var(--line); color:var(--lime); }
+        .all-scores .mini-standings { padding:8px; }
+
+        /* Compact game layout so the scoring controls fit typical Android screens without scrolling. */
+        .app-game { padding-top:8px; padding-bottom:max(10px, env(safe-area-inset-bottom)); min-height:100dvh; }
+        .app-game .nav { margin-bottom:7px; padding-bottom:7px; }
+        .app-game .brand h1 { font-size:17px; }
+        .app-game .icon-btn { width:32px; height:32px; border-radius:8px; }
+        .app-game .round-top { padding:2px 1px 7px; gap:8px; }
+        .app-game .round-name { font-size:36px; }
+        .app-game .round-rule { margin-top:3px; font-size:10.5px; line-height:1.2; max-width:235px; }
+        .app-game .round-ring { width:68px; height:68px; }
+        .app-game .now-card { margin-top:8px; padding:9px 11px; clip-path:none; border-radius:11px; }
+        .app-game .now-label { font-size:11px; }
+        .app-game .now-row { margin-top:0; gap:10px; }
+        .app-game .now-name { font-size:27px; }
+        .app-game .now-score { font-size:50px; }
+        .app-game .up-next { margin-top:6px; padding:6px 10px; font-size:12px; justify-content:flex-start; }
+        .app-game .all-scores { margin-top:5px; }
+        .app-game .score-display { margin-top:8px; min-height:42px; border-radius:9px; font-size:22px; }
+        .app-game .score-display.empty { font-size:12px; }
+        .app-game .score-conversion { min-height:15px; margin-top:3px; font-size:11px; }
+        .app-game .fixed-score-panel { margin-top:8px; padding:9px; }
+        .app-game .fixed-score-copy { font-size:10px; margin-bottom:6px; }
+        .app-game .fixed-score-btn { min-height:46px; font-size:16px; }
+        .app-game .keypad { gap:6px; margin-top:6px; }
+        .app-game .key { min-height:45px; border-radius:9px; font-size:20px; }
+        .app-game .key-enter { font-size:15px; }
+        .app-game .half-btn { margin-top:7px; min-height:44px; border-radius:10px; font-size:16px; }
+
+        @media (max-height: 760px) {
+          .app-game { padding-left:10px; padding-right:10px; }
+          .app-game .nav { margin-bottom:4px; padding-bottom:4px; }
+          .app-game .brand h1 { font-size:15px; }
+          .app-game .icon-btn { width:29px; height:29px; }
+          .app-game .round-top { padding-bottom:4px; }
+          .app-game .round-name { font-size:31px; }
+          .app-game .round-rule { font-size:9.5px; max-width:220px; }
+          .app-game .round-ring { width:60px; height:60px; }
+          .app-game .now-card { margin-top:5px; padding:6px 9px; }
+          .app-game .now-label { font-size:10px; }
+          .app-game .now-name { font-size:23px; }
+          .app-game .now-score { font-size:42px; }
+          .app-game .up-next { margin-top:4px; padding:5px 9px; font-size:11px; }
+          .app-game .score-display { margin-top:5px; min-height:35px; font-size:19px; }
+          .app-game .score-conversion { min-height:12px; margin-top:2px; font-size:10px; }
+          .app-game .keypad { gap:5px; margin-top:4px; }
+          .app-game .key { min-height:38px; font-size:18px; }
+          .app-game .key-enter { font-size:13px; }
+          .app-game .half-btn { margin-top:5px; min-height:38px; font-size:14px; }
+          .app-game .fixed-score-panel { margin-top:5px; padding:7px; }
+          .app-game .fixed-score-btn { min-height:40px; }
+          .app-game .all-scores summary { padding:5px 9px; font-size:10px; }
+        }
+
+        @media (max-height: 660px) {
+          .app-game .nav { display:none; }
+          .app-game .round-top { padding-top:0; }
+          .app-game .round-name { font-size:28px; }
+          .app-game .round-rule { display:none; }
+          .app-game .round-ring { width:54px; height:54px; }
+          .app-game .now-card { margin-top:4px; }
+          .app-game .now-label { display:none; }
+          .app-game .now-name { font-size:21px; }
+          .app-game .now-score { font-size:38px; }
+          .app-game .score-display { min-height:31px; }
+          .app-game .key { min-height:34px; }
+          .app-game .half-btn { min-height:34px; }
+        }
       `}</style>
 
       <div className="nav">
@@ -506,32 +617,72 @@ export default function HalfItScoreboard() {
           </div>
 
           {next && (
-            <div className="up-next"><span>Up Next</span><strong>{next.name}</strong></div>
-          )}
-
-          {players.length > 1 && (
-            <div className="mini-standings">
-              {players.map((p, i) => (
-                <div className={`mini-score ${i === playerIndex ? "active" : ""}`} key={`${p.name}-score`}>
-                  <div className="n">{p.name}</div>
-                  <div className="s">{p.score}</div>
-                </div>
-              ))}
+            <div className="up-next">
+              <span>Up Next</span>
+              <strong>{next.name}</strong>
+              <span className="up-next-score">{next.score}</span>
             </div>
           )}
 
-          <div className={`score-display ${scoreInput === "" ? "empty" : ""}`}>
-            {scoreInput === "" ? "ENTER SCORE" : scoreInput}
-          </div>
+          {players.length > 2 && (
+            <details className="all-scores">
+              <summary>View all scores ({players.length})</summary>
+              <div className="mini-standings">
+                {players.map((p, i) => (
+                  <div className={`mini-score ${i === playerIndex ? "active" : ""}`} key={`${p.name}-score`}>
+                    <div className="n">{p.name}</div>
+                    <div className="s">{p.score}</div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
 
-          <div className="keypad">
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
-              <button className="key" key={n} onClick={() => keypadPress(n)}>{n}</button>
-            ))}
-            <button className="key" onClick={() => keypadPress("back")} aria-label="Backspace"><Delete size={22} /></button>
-            <button className="key" onClick={() => keypadPress(0)}>0</button>
-            <button className="key key-enter" disabled={scoreInput === ""} onClick={() => keypadPress("enter")}>ENTER</button>
-          </div>
+          {round.kind === "fixed" ? (
+            <div className="fixed-score-panel">
+              <div className="fixed-score-copy">If the player scored exactly 45 with the 3 darts:</div>
+              <button className="fixed-score-btn" onClick={submitFixedScore}>✓ Add 45 Points</button>
+            </div>
+          ) : (
+            <>
+              <div className={`score-display ${scoreInput === "" ? "empty" : ""}`}>
+                {scoreInput === ""
+                  ? (round.kind === "units" ? `ENTER ${round.min}–${round.max}` : `ENTER ${round.min}–${round.max}`)
+                  : scoreInput}
+              </div>
+
+              {round.kind === "units" && scoreInput !== "" && (
+                <div className="score-conversion">
+                  {scoreInput} × {round.multiplier} = {Number(scoreInput) * round.multiplier} points
+                </div>
+              )}
+
+              <div className="keypad">
+                {(round.kind === "units"
+                  ? Array.from({ length: round.max - round.min + 1 }, (_, i) => i + round.min)
+                  : [1, 2, 3, 4, 5, 6, 7, 8, 9]
+                ).map((n) => (
+                  <button className="key" key={n} onClick={() => keypadPress(n)}>{n}</button>
+                ))}
+
+                {round.kind === "score" && (
+                  <>
+                    <button className="key" onClick={() => keypadPress("back")} aria-label="Backspace"><Delete size={22} /></button>
+                    <button className="key" onClick={() => keypadPress(0)}>0</button>
+                  </>
+                )}
+
+                {round.kind === "units" && round.max === 6 && (
+                  <>
+                    <button className="key" disabled aria-hidden="true">•</button>
+                    <button className="key" disabled aria-hidden="true">•</button>
+                  </>
+                )}
+
+                <button className="key key-enter" disabled={scoreInput === ""} onClick={() => keypadPress("enter")}>ENTER</button>
+              </div>
+            </>
+          )}
 
           <button className="half-btn" onClick={halfIt}>✕ &nbsp; Half It (Bust)</button>
         </div>
