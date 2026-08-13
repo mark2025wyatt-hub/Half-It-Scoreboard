@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { loadGameRecords, saveGameRecord, usingSharedDatabase } from "./data";
+import { loadGameRecords, saveGameRecord, loadProfiles, createProfile, usingSharedDatabase } from "./data";
 import {
   Target,
   Trophy,
@@ -17,6 +17,11 @@ import {
   Menu,
   Volume2,
   Sparkles,
+  UserCircle2,
+  UserPlus,
+  UserRound,
+  Zap,
+  Medal,
 } from "lucide-react";
 
 const ACTIVE_GAME_KEY = "half-it-active-game-v1";
@@ -102,9 +107,16 @@ export default function HalfItScoreboard() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [resultAwards, setResultAwards] = useState({});
   const [savedActiveGame, setSavedActiveGame] = useState(null);
+  const [profiles, setProfiles] = useState([]);
+  const [profilesLoading, setProfilesLoading] = useState(true);
+  const [profileError, setProfileError] = useState("");
+  const [profileForm, setProfileForm] = useState({ displayName: "", nickname: "", avatar: "target", accent: "lime" });
+  const [profileReturn, setProfileReturn] = useState("players");
+  const [statsProfileId, setStatsProfileId] = useState(null);
 
   useEffect(() => {
     loadGames();
+    loadPlayerProfiles();
     try {
       const saved = JSON.parse(localStorage.getItem(ACTIVE_GAME_KEY) || "null");
       if (saved?.players?.length && saved.roundIndex < ROUNDS.length) {
@@ -131,6 +143,79 @@ export default function HalfItScoreboard() {
     keepAwake();
     return () => { try { lock?.release(); } catch {} };
   }, [screen]);
+
+  async function loadPlayerProfiles() {
+    setProfilesLoading(true);
+    try {
+      const rows = await loadProfiles();
+      setProfiles(rows);
+      setProfileError("");
+    } catch {
+      setProfiles([]);
+      setProfileError("Player profiles could not be loaded.");
+    }
+    setProfilesLoading(false);
+  }
+
+  function openCreateProfile(returnTo = "players") {
+    setProfileReturn(returnTo);
+    setProfileForm({ displayName: "", nickname: "", avatar: "target", accent: "lime" });
+    setProfileError("");
+    setScreen("createProfile");
+  }
+
+  async function submitProfile() {
+    const displayName = profileForm.displayName.trim();
+    if (!displayName) {
+      setProfileError("Enter a display name.");
+      return;
+    }
+    if (profiles.some(p => p.displayName.toLowerCase() === displayName.toLowerCase())) {
+      setProfileError("That player name already has a profile.");
+      return;
+    }
+    try {
+      const profile = await createProfile({
+        displayName,
+        nickname: profileForm.nickname.trim(),
+        avatar: profileForm.avatar,
+        accent: profileForm.accent,
+      });
+      setProfiles(current => [...current, profile].sort((a,b) => a.displayName.localeCompare(b.displayName)));
+      setProfileError("");
+      if (profileReturn === "setup") {
+        addSavedProfile(profile);
+        setScreen("setup");
+      } else {
+        setScreen("players");
+      }
+    } catch (err) {
+      setProfileError(err?.message || "Profile could not be created.");
+    }
+  }
+
+  function addSavedProfile(profile) {
+    if (!profile) return;
+    if (gameMode === "solo" && players.length >= 1) return;
+    if (players.some(p => p.profileId === profile.id)) return;
+    setPlayers(current => [...current, {
+      profileId: profile.id,
+      name: profile.displayName,
+      nickname: profile.nickname || "",
+      avatar: profile.avatar || "target",
+      accent: profile.accent || "lime",
+      guest: false,
+      score: 0,
+      history: [],
+    }]);
+  }
+
+  function viewProfile(profile) {
+    setStatsProfileId(profile.id);
+    setStatsName(profile.displayName);
+    setStatsFilter("all");
+    setScreen("personal");
+  }
 
   async function loadGames() {
     try {
@@ -194,7 +279,7 @@ export default function HalfItScoreboard() {
       return;
     }
     if (gameMode === "solo" && players.length >= 1) return;
-    setPlayers([...players, { name: trimmed, score: 0, history: [] }]);
+    setPlayers([...players, { profileId: null, name: trimmed, nickname: "", avatar: "guest", accent: "slate", guest: true, score: 0, history: [] }]);
     setNameInput("");
   }
 
@@ -324,10 +409,24 @@ export default function HalfItScoreboard() {
     }));
     const previousOverall = Math.max(-1, ...(allGames || []).filter(g => g.mode === "multiplayer").flatMap(g => g.players?.map(p => p.score) || []));
     const awards = {};
-    ranked.forEach(p => { awards[p.name] = { personalBest: p.score > (previousByName[p.name.toLowerCase()] ?? -1), allTime: gameMode === "multiplayer" && p.score > previousOverall }; });
+    ranked.forEach(p => {
+      const previousForProfile = (allGames || []).flatMap(g => g.players || [])
+        .filter(old => p.profileId ? old.profileId === p.profileId : old.name?.toLowerCase() === p.name.toLowerCase())
+        .reduce((best, old) => Math.max(best, old.score ?? -1), -1);
+      awards[p.profileId || p.name] = {
+        personalBest: !p.guest && p.score > previousForProfile,
+        allTime: gameMode === "multiplayer" && p.score > previousOverall
+      };
+    });
     setResultAwards(awards);
     const record = { id: `g${Date.now()}`, date: new Date().toISOString(), mode: gameMode,
-      players: ranked.map(p => ({ name:p.name, score:p.score, won:gameMode === "multiplayer" && p.score === topScore })) };
+      players: ranked.map(p => ({
+        profileId: p.profileId || null,
+        name:p.name,
+        guest:Boolean(p.guest),
+        score:p.score,
+        won:gameMode === "multiplayer" && p.score === topScore
+      })) };
     saveGame(record); setPlayers(finalPlayers); localStorage.removeItem(ACTIVE_GAME_KEY); setSavedActiveGame(null); setScreen("results");
   }
 
@@ -384,18 +483,29 @@ export default function HalfItScoreboard() {
   }, [allGames]);
 
   const personalStats = useMemo(() => {
-    if (!allGames || !statsName.trim()) return null;
+    if (!allGames || (!statsName.trim() && !statsProfileId)) return null;
     const lower = statsName.trim().toLowerCase();
     const rows = [];
     allGames.forEach(g => {
       if (statsFilter !== "all" && g.mode !== statsFilter) return;
-      const mine = g.players?.find(p => p.name.toLowerCase() === lower);
+      const mine = g.players?.find(p => {
+        if (statsProfileId && p.profileId) return p.profileId === statsProfileId;
+        return p.name?.toLowerCase() === lower;
+      });
       if (mine) rows.push({ ...mine, date:g.date, gameId:g.id, mode:g.mode || (g.players?.length > 1 ? "multiplayer" : "solo") });
     });
     if (!rows.length) return { found:false };
     const scores=rows.map(r=>r.score); const best=Math.max(...scores); const avg=Math.round(scores.reduce((a,b)=>a+b,0)/scores.length);
-    return { found:true, gamesPlayed:rows.length, best, avg, highScores:[...rows].sort((a,b)=>b.score-a.score || new Date(b.date)-new Date(a.date)) };
-  }, [allGames, statsName, statsFilter]);
+    const wins = rows.filter(r => r.won).length;
+    return { found:true, gamesPlayed:rows.length, best, avg, wins, highScores:[...rows].sort((a,b)=>b.score-a.score || new Date(b.date)-new Date(a.date)) };
+  }, [allGames, statsName, statsProfileId, statsFilter]);
+
+  const selectedStatsProfile = useMemo(
+    () => profiles.find(p => p.id === statsProfileId) || null,
+    [profiles, statsProfileId]
+  );
+
+  const avatarGlyph = (avatar) => avatar === "trophy" ? "🏆" : avatar === "bolt" ? "⚡" : avatar === "dart" ? "🎯" : avatar === "medal" ? "🏅" : avatar === "guest" ? "G" : "◎";
 
   const current = players[playerIndex];
   const next = players.length > 1 ? players[(playerIndex + 1) % players.length] : null;
@@ -564,6 +674,51 @@ export default function HalfItScoreboard() {
         .medal { width:30px; height:30px; display:grid; place-items:center; border-radius:50%; background:rgba(140,240,0,.09); font-weight:700; }
         .pb-badge { margin-left:7px; color:var(--lime); font-size:10px; text-transform:uppercase; font-weight:700; }
         .record-banner { border:1px solid var(--lime); background:rgba(140,240,0,.08); border-radius:13px; padding:13px; text-align:center; margin-bottom:12px; color:var(--lime); font-family:'Oswald',sans-serif; text-transform:uppercase; font-size:18px; }
+        .profile-grid { display:grid; gap:8px; }
+        .profile-pick, .profile-row { width:100%; border:1px solid var(--line); background:rgba(255,255,255,.025); color:var(--text); border-radius:12px; padding:10px 12px; display:flex; align-items:center; gap:11px; text-align:left; cursor:pointer; }
+        .profile-pick.selected { border-color:var(--lime); background:rgba(140,240,0,.07); }
+        .profile-pick:disabled { opacity:.4; cursor:not-allowed; }
+        .profile-avatar { width:42px; height:42px; flex:0 0 42px; display:grid; place-items:center; border-radius:50%; border:2px solid currentColor; font-family:'Oswald',sans-serif; font-weight:700; font-size:18px; color:var(--lime); background:#07131e; }
+        .profile-avatar.large { width:52px; height:52px; flex-basis:52px; font-size:21px; }
+        .profile-avatar.hero-avatar { width:72px; height:72px; flex-basis:72px; font-size:29px; box-shadow:0 0 26px rgba(140,240,0,.08); }
+        .profile-pick-copy, .profile-row-copy { flex:1; min-width:0; display:flex; flex-direction:column; }
+        .profile-pick-copy strong, .profile-row-copy strong { font-size:14px; }
+        .profile-pick-copy small, .profile-row-copy small, .profile-preview small, .profile-stats-head small { color:var(--muted); margin-top:2px; font-size:11px; }
+        .profile-check { color:var(--lime); font-size:20px; font-weight:700; }
+        .profile-create-inline { margin-top:10px; min-height:46px; }
+        .guest-divider { display:flex; align-items:center; gap:10px; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.08em; margin:17px 0 10px; }
+        .guest-divider:before,.guest-divider:after { content:''; height:1px; background:var(--line); flex:1; }
+        .player-chip em { font-style:normal; color:var(--muted); font-size:9px; text-transform:uppercase; margin-left:6px; border:1px solid var(--line); border-radius:999px; padding:2px 5px; }
+        .players-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:14px; }
+        .profile-list { display:grid; gap:8px; margin-top:14px; }
+        .profile-row:hover { border-color:var(--lime); }
+        .guest-info { margin-top:14px; display:flex; gap:12px; align-items:flex-start; }
+        .profile-preview { margin:18px 0; padding:18px; border:1px solid var(--line); border-radius:14px; background:linear-gradient(135deg,rgba(140,240,0,.05),rgba(23,200,255,.04)); display:flex; align-items:center; gap:14px; }
+        .profile-preview strong { display:block; font-family:'Oswald',sans-serif; font-size:25px; text-transform:uppercase; }
+        .form-label { display:block; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.07em; margin:14px 0 6px; }
+        .form-label span { text-transform:none; letter-spacing:0; }
+        .text-input.full { width:100%; }
+        .avatar-options { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; }
+        .avatar-choice { height:52px; border:1px solid var(--line); border-radius:11px; background:#07131e; color:var(--text); font-size:22px; cursor:pointer; }
+        .avatar-choice.active { border-color:var(--lime); box-shadow:inset 0 0 0 1px var(--lime); }
+        .accent-options { display:flex; gap:10px; }
+        .accent-choice { width:34px; height:34px; border-radius:50%; border:3px solid transparent; cursor:pointer; background:currentColor; }
+        .accent-choice.active { outline:2px solid var(--text); outline-offset:2px; }
+        .accent-lime { color:#8cf000; }
+        .accent-cyan { color:#17c8ff; }
+        .accent-purple { color:#a87cff; }
+        .accent-orange { color:#ff9a3d; }
+        .accent-pink { color:#ff63ad; }
+        .accent-slate { color:#8ea1b2; }
+        .profile-stats-head { display:flex; align-items:center; gap:11px; padding:12px; border:1px solid var(--line); border-radius:12px; margin-bottom:12px; }
+        .profile-stats-head > div { flex:1; display:flex; flex-direction:column; }
+        .profile-stats-head strong { font-family:'Oswald',sans-serif; font-size:21px; text-transform:uppercase; }
+        .mini-link { border:0; background:transparent; color:var(--cyan); cursor:pointer; font-size:11px; }
+        .profile-quick-select { display:flex; gap:7px; overflow-x:auto; padding:1px 0 10px; }
+        .profile-quick-select button { flex:0 0 auto; display:flex; align-items:center; gap:6px; border:1px solid var(--line); background:#07131e; color:var(--text); border-radius:999px; padding:5px 9px 5px 5px; cursor:pointer; font-size:11px; }
+        .tiny-avatar { width:25px; height:25px; border-radius:50%; border:1px solid currentColor; display:grid; place-items:center; font-size:11px; }
+        .wins-strip { margin:-3px 0 14px; display:flex; align-items:center; justify-content:center; gap:6px; color:var(--muted); font-size:11px; }
+        .wins-strip strong { color:var(--lime); }
         /* Compact game layout so the scoring controls fit typical Android screens without scrolling. */
         .app-game { padding-top:8px; padding-bottom:max(10px, env(safe-area-inset-bottom)); min-height:100dvh; }
         .app-game .nav { margin-bottom:7px; padding-bottom:7px; }
@@ -646,7 +801,8 @@ export default function HalfItScoreboard() {
             </div>}
           </div> : <>
             <button className="icon-btn" onClick={() => setScreen("leaderboard")} title="Leaderboard"><Trophy size={17} /></button>
-            <button className="icon-btn" onClick={() => setScreen("personal")} title="My Scores"><BarChart2 size={17} /></button>
+            <button className="icon-btn" onClick={() => setScreen("players")} title="Players"><Users size={17} /></button>
+            <button className="icon-btn" onClick={() => { setStatsProfileId(null); setScreen("personal"); }} title="My Scores"><BarChart2 size={17} /></button>
             <button className="icon-btn" onClick={() => setScreen("home")} title="Home"><Home size={17} /></button>
           </>}
         </div>
@@ -678,7 +834,8 @@ export default function HalfItScoreboard() {
             <button className="btn btn-lime" onClick={() => startFreshSetup("multiplayer")}><Users size={18} /> Multiplayer Game</button>
             <button className="btn btn-cyan" onClick={() => startFreshSetup("solo")}><Target size={18} /> Solo Practice</button>
             <button className="btn btn-outline" onClick={() => setScreen("leaderboard")}><Trophy size={18} /> Leaderboard</button>
-            <button className="btn btn-outline" onClick={() => setScreen("personal")}><BarChart2 size={18} /> My Scores</button>
+            <button className="btn btn-outline" onClick={() => setScreen("players")}><Users size={18} /> Players & Profiles</button>
+            <button className="btn btn-outline" onClick={() => { setStatsProfileId(null); setScreen("personal"); }}><BarChart2 size={18} /> My Scores</button>
           </div>
           <p className="shared-note">Competitive leaderboard scores come only from games with 2 or more players. Solo practice stays in My Scores. {usingSharedDatabase ? "Shared database connected." : "Currently using this device only until Supabase is connected."}</p>
         </div>
@@ -687,15 +844,45 @@ export default function HalfItScoreboard() {
       {screen === "setup" && (
         <div>
           <div className="mode-badge">{gameMode === "solo" ? "Solo Practice" : "Multiplayer"}</div>
-          <h2 className="setup-heading">{gameMode === "solo" ? "Who's practising?" : "Who's playing?"}</h2>
-          <p className="muted small" style={{ marginTop: 0, marginBottom: 16 }}>
-            {gameMode === "solo" ? "Add your player name. This score will only appear in My Scores." : "Add 2 or more players in throwing order."}
+          <h2 className="setup-heading">{gameMode === "solo" ? "Choose your player" : "Who's playing?"}</h2>
+          <p className="muted small" style={{ marginTop: 0, marginBottom: 14 }}>
+            Select saved profiles for faster setup, or add somebody as a guest.
           </p>
 
+          <div className="section-title"><UserCircle2 size={15}/> Saved Profiles</div>
+          <div className="profile-grid">
+            {profilesLoading && <div className="empty-note">Loading profiles…</div>}
+            {!profilesLoading && profiles.length === 0 && <div className="empty-note">No profiles yet — create the first one.</div>}
+            {profiles.map(profile => {
+              const selected = players.some(p => p.profileId === profile.id);
+              const disabled = !selected && gameMode === "solo" && players.length >= 1;
+              return (
+                <button
+                  className={`profile-pick ${selected ? "selected" : ""}`}
+                  key={profile.id}
+                  disabled={disabled}
+                  onClick={() => selected
+                    ? setPlayers(current => current.filter(p => p.profileId !== profile.id))
+                    : addSavedProfile(profile)}
+                >
+                  <span className={`profile-avatar accent-${profile.accent || "lime"}`}>{avatarGlyph(profile.avatar)}</span>
+                  <span className="profile-pick-copy">
+                    <strong>{profile.displayName}</strong>
+                    <small>{profile.nickname || "Player profile"}</small>
+                  </span>
+                  <span className="profile-check">{selected ? "✓" : "+"}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <button className="btn btn-cyan profile-create-inline" onClick={() => openCreateProfile("setup")}><UserPlus size={17}/> Create New Profile</button>
+
+          <div className="guest-divider"><span>or play as guest</span></div>
           <div className="row">
             <input
               className="text-input"
-              placeholder="Player name"
+              placeholder="Guest name"
               value={nameInput}
               disabled={gameMode === "solo" && players.length >= 1}
               onChange={(e) => setNameInput(e.target.value)}
@@ -704,12 +891,15 @@ export default function HalfItScoreboard() {
             <button className="add-btn" onClick={addPlayer} disabled={gameMode === "solo" && players.length >= 1}><Plus size={19} /></button>
           </div>
 
-          {players.map((p, i) => (
-            <div className="player-chip" key={`${p.name}-${i}`}>
-              <span>{i + 1}. {p.name}</span>
-              <button onClick={() => removePlayer(i)}><X size={16} /></button>
-            </div>
-          ))}
+          {players.length > 0 && <div className="selected-players">
+            <div className="section-title" style={{marginTop:14}}>Throwing Order</div>
+            {players.map((p, i) => (
+              <div className="player-chip" key={`${p.profileId || p.name}-${i}`}>
+                <span><b>{i + 1}.</b> {p.name} {p.guest && <em>Guest</em>}</span>
+                <button onClick={() => removePlayer(i)}><X size={16} /></button>
+              </div>
+            ))}
+          </div>}
 
           <div className="btn-stack">
             <button className="btn btn-lime" disabled={!canStart} onClick={startGame}>
@@ -832,7 +1022,7 @@ export default function HalfItScoreboard() {
             {[...players].sort((a, b) => b.score - a.score).map((p, i) => (
               <div className={`result-row ${gameMode === "multiplayer" && i === 0 ? "winner" : ""}`} key={`${p.name}-result`}>
                 <span className="rank">{i + 1}</span>
-                <span className="result-name">{gameMode === "multiplayer" && i === 0 && <Trophy size={14} color="var(--lime)" style={{ marginRight: 6, verticalAlign: -2 }} />}{p.name}{resultAwards[p.name]?.personalBest && <span className="pb-badge">★ Personal Best</span>}{resultAwards[p.name]?.allTime && <span className="pb-badge">⚡ All-Time #1</span>}</span>
+                <span className="result-name">{gameMode === "multiplayer" && i === 0 && <Trophy size={14} color="var(--lime)" style={{ marginRight: 6, verticalAlign: -2 }} />}{p.name}{resultAwards[p.profileId || p.name]?.personalBest && <span className="pb-badge">★ Personal Best</span>}{resultAwards[p.profileId || p.name]?.allTime && <span className="pb-badge">⚡ All-Time #1</span>}</span>
                 <span className="score">{p.score}</span>
               </div>
             ))}
@@ -841,7 +1031,7 @@ export default function HalfItScoreboard() {
           <div className="btn-stack">
             <button className="btn btn-lime" onClick={playAgain}><RotateCcw size={17} /> Play Again</button>
             {gameMode === "solo" ? (
-              <button className="btn btn-outline" onClick={() => { setStatsName(players[0]?.name || ""); setScreen("personal"); }}><BarChart2 size={17} /> View My Scores</button>
+              <button className="btn btn-outline" onClick={() => { setStatsName(players[0]?.name || ""); setStatsProfileId(players[0]?.profileId || null); setScreen("personal"); }}><BarChart2 size={17} /> View My Scores</button>
             ) : (
               <button className="btn btn-outline" onClick={() => setScreen("leaderboard")}><Trophy size={17} /> View Leaderboard</button>
             )}
@@ -870,21 +1060,110 @@ export default function HalfItScoreboard() {
         </div>
       )}
 
+      {screen === "players" && (
+        <div>
+          <div className="players-head">
+            <div>
+              <div className="section-title"><Users size={15}/> Players</div>
+              <h2 className="setup-heading">Player Profiles</h2>
+              <p className="muted small">Profiles make game setup faster and keep scores attached to the right person.</p>
+            </div>
+            <button className="icon-btn" onClick={() => openCreateProfile("players")} title="Create profile"><UserPlus size={18}/></button>
+          </div>
+
+          <button className="btn btn-lime" onClick={() => openCreateProfile("players")}><UserPlus size={18}/> Create New Profile</button>
+          {profileError && <div className="notice" style={{marginTop:12}}>{profileError}</div>}
+
+          <div className="profile-list">
+            {profilesLoading && <p className="empty-note">Loading profiles…</p>}
+            {!profilesLoading && profiles.length === 0 && <p className="empty-note">No profiles yet. Create one to start building personal stats.</p>}
+            {profiles.map(profile => (
+              <button className="profile-row" key={profile.id} onClick={() => viewProfile(profile)}>
+                <span className={`profile-avatar large accent-${profile.accent || "lime"}`}>{avatarGlyph(profile.avatar)}</span>
+                <span className="profile-row-copy">
+                  <strong>{profile.displayName}</strong>
+                  <small>{profile.nickname || "View scores & stats"}</small>
+                </span>
+                <ChevronRight size={18}/>
+              </button>
+            ))}
+          </div>
+          <div className="panel guest-info">
+            <UserRound size={20}/>
+            <div><strong>Guest players are always available</strong><div className="muted small">Guests can play without creating a profile. Their multiplayer score still counts on the public leaderboard, but they don't get a permanent profile.</div></div>
+          </div>
+        </div>
+      )}
+
+      {screen === "createProfile" && (
+        <div>
+          <div className="mode-badge">New Player</div>
+          <h2 className="setup-heading">Create Profile</h2>
+          <p className="muted small" style={{marginTop:0}}>Quick setup — no email or password required.</p>
+
+          <div className="profile-preview">
+            <span className={`profile-avatar hero-avatar accent-${profileForm.accent}`}>{avatarGlyph(profileForm.avatar)}</span>
+            <div>
+              <strong>{profileForm.displayName.trim() || "Your Name"}</strong>
+              <small>{profileForm.nickname.trim() || "Your darts profile"}</small>
+            </div>
+          </div>
+
+          <label className="form-label">Display name</label>
+          <input className="text-input full" maxLength={30} placeholder="e.g. Alex" value={profileForm.displayName} onChange={e => setProfileForm(f => ({...f, displayName:e.target.value}))}/>
+
+          <label className="form-label">Nickname <span>optional</span></label>
+          <input className="text-input full" maxLength={40} placeholder="e.g. The Mannheim Missile" value={profileForm.nickname} onChange={e => setProfileForm(f => ({...f, nickname:e.target.value}))}/>
+
+          <label className="form-label">Choose an icon</label>
+          <div className="avatar-options">
+            {[["target","◎"],["dart","🎯"],["trophy","🏆"],["bolt","⚡"],["medal","🏅"]].map(([value,label]) => (
+              <button key={value} className={`avatar-choice ${profileForm.avatar===value?"active":""}`} onClick={() => setProfileForm(f => ({...f, avatar:value}))}>{label}</button>
+            ))}
+          </div>
+
+          <label className="form-label">Profile accent</label>
+          <div className="accent-options">
+            {["lime","cyan","purple","orange","pink"].map(value => (
+              <button aria-label={value} key={value} className={`accent-choice accent-${value} ${profileForm.accent===value?"active":""}`} onClick={() => setProfileForm(f => ({...f, accent:value}))}/>
+            ))}
+          </div>
+
+          {profileError && <div className="notice" style={{marginTop:14}}>{profileError}</div>}
+          <div className="btn-stack">
+            <button className="btn btn-lime" onClick={submitProfile}><UserPlus size={18}/> Create Profile</button>
+            <button className="btn btn-outline" onClick={() => setScreen(profileReturn === "setup" ? "setup" : "players")}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       {screen === "personal" && (
         <div>
-          <div className="section-title"><BarChart2 size={15} /> My Scores</div>
-          <div className="row" style={{ marginBottom: 14 }}>
-            <input
-              className="text-input"
-              placeholder="Type your player name…"
-              value={statsName}
-              onChange={(e) => setStatsName(e.target.value)}
-              list="solo-names"
-            />
-            <datalist id="solo-names">
-              {soloNames.map((name) => <option value={name} key={name} />)}
-            </datalist>
-          </div>
+          <div className="section-title"><BarChart2 size={15} /> Player Scores</div>
+          {selectedStatsProfile && (
+            <div className="profile-stats-head">
+              <span className={`profile-avatar large accent-${selectedStatsProfile.accent || "lime"}`}>{avatarGlyph(selectedStatsProfile.avatar)}</span>
+              <div><strong>{selectedStatsProfile.displayName}</strong><small>{selectedStatsProfile.nickname || "Player profile"}</small></div>
+              <button className="mini-link" onClick={() => { setStatsProfileId(null); setStatsName(""); }}>Change</button>
+            </div>
+          )}
+          {!selectedStatsProfile && <>
+            <div className="profile-quick-select">
+              {profiles.slice(0,8).map(profile => <button key={profile.id} onClick={() => { setStatsProfileId(profile.id); setStatsName(profile.displayName); }}><span className={`tiny-avatar accent-${profile.accent || "lime"}`}>{avatarGlyph(profile.avatar)}</span>{profile.displayName}</button>)}
+            </div>
+            <div className="row" style={{ marginBottom: 14 }}>
+              <input
+                className="text-input"
+                placeholder="Or type a player name…"
+                value={statsName}
+                onChange={(e) => { setStatsProfileId(null); setStatsName(e.target.value); }}
+                list="solo-names"
+              />
+              <datalist id="solo-names">
+                {soloNames.map((name) => <option value={name} key={name} />)}
+              </datalist>
+            </div>
+          </>}
 
           <div className="filter-tabs">
             {[['all','Combined'],['solo','Solo'],['multiplayer','Multiplayer']].map(([v,label]) => <button key={v} className={`filter-tab ${statsFilter===v?'active':''}`} onClick={()=>setStatsFilter(v)}>{label}</button>)}
@@ -902,6 +1181,7 @@ export default function HalfItScoreboard() {
                 <div className="stat"><div className="num">{personalStats.avg}</div><div className="label">Average</div></div>
                 <div className="stat"><div className="num">{personalStats.gamesPlayed}</div><div className="label">Games</div></div>
               </div>
+              {statsFilter !== "solo" && <div className="wins-strip"><Trophy size={15}/> Multiplayer wins: <strong>{personalStats.wins}</strong></div>}
 
               <div className="panel">
                 <div className="section-title" style={{ marginTop: 0 }}>High Scores</div>
