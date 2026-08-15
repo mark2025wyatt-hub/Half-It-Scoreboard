@@ -999,6 +999,13 @@ export default function HalfItScoreboard() {
         .nav-btns { display:flex; gap:7px; }
         .icon-btn { width:38px; height:38px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.025); color:var(--text); display:grid; place-items:center; cursor:pointer; }
         .icon-btn:hover { border-color:var(--lime); color:var(--lime); }
+        .menu-trigger {
+          width:44px; height:44px; border-radius:11px;
+          border-color:#3b566c;
+          background:linear-gradient(180deg,rgba(22,42,57,.96),rgba(8,23,34,.98));
+          box-shadow:0 4px 13px rgba(0,0,0,.24);
+        }
+        .menu-trigger:hover { border-color:#5f7f97; color:var(--text); }
 
         .notice { display:flex; gap:8px; align-items:flex-start; padding:10px 12px; border:1px solid rgba(255,59,59,.7); background:rgba(255,59,59,.09); border-radius:10px; font-size:12px; margin-bottom:14px; }
         .hero { text-align:center; padding:10px 0 18px; }
@@ -1114,9 +1121,10 @@ export default function HalfItScoreboard() {
         }
         .half-icon {
           height:50px; border-radius:12px; display:grid; place-items:center;
-          color:#ff6a73; background:rgba(255,74,83,.10);
+          color:#ff5964; background:rgba(255,74,83,.10);
           border:1px solid rgba(255,106,115,.20);
         }
+        .half-board-icon { width:36px; height:36px; display:block; overflow:visible; filter:drop-shadow(0 0 5px rgba(255,74,83,.28)); }
         .half-label { justify-self:start; padding-left:12px; font-size:23px; letter-spacing:.05em; }
         .half-score { justify-self:end; color:#ff747c; font-family:'IBM Plex Mono',monospace; font-size:16px; font-style:normal; font-weight:700; }
 
@@ -1337,6 +1345,7 @@ export default function HalfItScoreboard() {
         .app-game .nav { margin-bottom:7px; padding-bottom:7px; }
         .app-game .brand h1 { font-size:17px; }
         .app-game .icon-btn { width:32px; height:32px; border-radius:8px; }
+        .app-game .menu-trigger { width:40px; height:40px; border-radius:10px; }
         .app-game .round-top { padding:2px 1px 7px; gap:8px; }
         .app-game .round-name { font-size:36px; }
         .app-game .round-rule { margin-top:3px; font-size:10.5px; line-height:1.2; max-width:235px; }
@@ -1366,6 +1375,7 @@ export default function HalfItScoreboard() {
         .app-game .add-visit { min-height:48px; font-size:16px; }
         .app-game .half-btn { margin-top:7px; min-height:60px; border-radius:14px; }
         .app-game .half-icon { height:48px; }
+        .app-game .half-board-icon { width:34px; height:34px; }
         .app-game .half-label { font-size:22px; }
         .app-game .half-score { font-size:15px; }
 
@@ -1374,6 +1384,7 @@ export default function HalfItScoreboard() {
           .app-game .nav { margin-bottom:4px; padding-bottom:4px; }
           .app-game .brand h1 { font-size:15px; }
           .app-game .icon-btn { width:29px; height:29px; }
+          .app-game .menu-trigger { width:38px; height:38px; }
           .app-game .round-top { padding-bottom:4px; }
           .app-game .round-name { font-size:31px; }
           .app-game .round-rule { font-size:9.5px; max-width:220px; }
@@ -1396,6 +1407,7 @@ export default function HalfItScoreboard() {
           .app-game .add-visit { min-height:43px; font-size:15px; }
           .app-game .half-btn { margin-top:6px; min-height:55px; }
           .app-game .half-icon { height:43px; }
+          .app-game .half-board-icon { width:31px; height:31px; }
           .app-game .half-label { font-size:19px; }
           .app-game .half-score { font-size:13px; }
           .app-game .fixed-score-panel { margin-top:5px; padding:7px; }
@@ -1418,6 +1430,7 @@ export default function HalfItScoreboard() {
           .app-game .dart-choice { min-height:38px; }
           .app-game .half-btn { min-height:50px; }
           .app-game .half-icon { height:39px; }
+          .app-game .half-board-icon { width:28px; height:28px; }
           .app-game .half-label { font-size:17px; }
           .app-game .half-score { font-size:12px; }
         }
@@ -1430,7 +1443,7 @@ export default function HalfItScoreboard() {
         </div>
         <div className="nav-btns">
           {screen === "game" ? <div className="menu-wrap">
-            <button className="icon-btn" onClick={() => setMenuOpen(v => !v)} title="Game menu"><Menu size={18} /></button>
+            <button className="icon-btn menu-trigger" onClick={() => setMenuOpen(v => !v)} title="Game menu"><Menu size={23} strokeWidth={2.4} /></button>
             {menuOpen && <div className="game-menu">
               {(undoHistory.length > 0 || lastAction) && <button onClick={() => { undoLastThrow(); setMenuOpen(false); }}><Undo2 size={14}/> Undo Last Entry</button>}
               <button onClick={() => { setMenuOpen(false); setScreen("leaderboard"); }}>Leaderboard</button>
@@ -1797,7 +1810,21 @@ export default function HalfItScoreboard() {
 
           {!roundSummary && (
             <button className="half-btn" onClick={halfIt}>
-              <span className="half-icon"><Target size={23} strokeWidth={2.5} /></span>
+              <span className="half-icon" aria-hidden="true">
+                <svg className="half-board-icon" viewBox="0 0 48 48" role="img">
+                  <circle cx="24" cy="24" r="18" fill="none" stroke="currentColor" strokeWidth="2.5" />
+                  <circle cx="24" cy="24" r="11" fill="none" stroke="currentColor" strokeWidth="2" opacity=".9" />
+                  <circle cx="24" cy="24" r="3.5" fill="currentColor" />
+                  <path d="M24 6 L20.5 14 L25.5 19 L21 25 L26 31 L22 36 L24 42"
+                        fill="none" stroke="#071018" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M24 6 L20.5 14 L25.5 19 L21 25 L26 31 L22 36 L24 42"
+                        fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M7.5 24 H20.5 M10.5 14 L21.5 21 M10.5 34 L21.5 27 M24 7 V19"
+                        fill="none" stroke="currentColor" strokeWidth="1.6" opacity=".9" />
+                  <path d="M40.5 24 H27.5 M37.5 14 L26.5 21 M37.5 34 L26.5 27 M24 41 V30"
+                        fill="none" stroke="currentColor" strokeWidth="1.6" opacity=".9" />
+                </svg>
+              </span>
               <span className="half-label">Half It</span>
               <span className="half-score">{current ? `${current.score} → ${Math.floor(current.score / 2)}` : ""}</span>
             </button>
