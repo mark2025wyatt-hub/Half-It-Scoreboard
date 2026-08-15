@@ -149,6 +149,7 @@ export default function HalfItScoreboard() {
   const [statsFilter, setStatsFilter] = useState("all");
   const [leaderboardTab, setLeaderboardTab] = useState("scores");
   const [lastAction, setLastAction] = useState(null);
+  const [undoHistory, setUndoHistory] = useState([]);
   const [scoreAnimation, setScoreAnimation] = useState(null);
   const [roundSummary, setRoundSummary] = useState(false);
   const [roundTransition, setRoundTransition] = useState(null);
@@ -219,11 +220,11 @@ export default function HalfItScoreboard() {
 
   useEffect(() => {
     if (screen === "game" && players.length) {
-      const snapshot = { gameMode, players, roundIndex, playerIndex, scoreInput, dartVisit, roundSummary, lastAction, roundStartScores };
+      const snapshot = { gameMode, players, roundIndex, playerIndex, scoreInput, dartVisit, roundSummary, lastAction, undoHistory, roundStartScores };
       localStorage.setItem(ACTIVE_GAME_KEY, JSON.stringify(snapshot));
       setSavedActiveGame(snapshot);
     }
-  }, [screen, gameMode, players, roundIndex, playerIndex, scoreInput, dartVisit, roundSummary, lastAction, roundStartScores]);
+  }, [screen, gameMode, players, roundIndex, playerIndex, scoreInput, dartVisit, roundSummary, lastAction, undoHistory, roundStartScores]);
 
   useEffect(() => {
     let lock;
@@ -491,7 +492,11 @@ export default function HalfItScoreboard() {
     setScoreInput(savedActiveGame.scoreInput || "");
     setDartVisit(savedActiveGame.dartVisit || []);
     setRoundSummary(Boolean(savedActiveGame.roundSummary));
-    setLastAction(savedActiveGame.lastAction || null);
+    const restoredUndo = Array.isArray(savedActiveGame.undoHistory)
+      ? savedActiveGame.undoHistory
+      : (savedActiveGame.lastAction ? [savedActiveGame.lastAction] : []);
+    setUndoHistory(restoredUndo);
+    setLastAction(restoredUndo[restoredUndo.length - 1] || savedActiveGame.lastAction || null);
     setRoundStartScores(savedActiveGame.roundStartScores || Object.fromEntries(savedActiveGame.players.map(p => [p.profileId || p.name, p.score || 0])));
     setScreen("game");
   }
@@ -535,6 +540,7 @@ export default function HalfItScoreboard() {
     setScoreInput("");
     setDartVisit([]);
     setLastAction(null);
+    setUndoHistory([]);
     setRoundStartScores(Object.fromEntries(players.map(p => [p.profileId || p.name, p.score || 0])));
     setScreen("game");
   }
@@ -596,7 +602,9 @@ export default function HalfItScoreboard() {
       ...p, score: p.score + points,
       history: [...p.history, { round: ROUNDS[roundIndex].name, delta: points, half: false, enteredValue }],
     } : p);
-    setLastAction({ players: before, roundIndex, playerIndex, roundStartScores, actor: actor.name, label: `+${points}` });
+    const actionSnapshot = { players: before, roundIndex, playerIndex, roundStartScores, actor: actor.name, label: `+${points}` };
+    setUndoHistory(history => [...history, actionSnapshot]);
+    setLastAction(actionSnapshot);
     setPlayers(updated);
     setFlash({ i: playerIndex, type: "score" });
     setScoreAnimation({ type: "score", text: `+${points}` });
@@ -659,7 +667,9 @@ export default function HalfItScoreboard() {
       ...p, score: newScore,
       history: [...p.history, { round: ROUNDS[roundIndex].name, delta: newScore - p.score, half: true }],
     });
-    setLastAction({ players: before, roundIndex, playerIndex, roundStartScores, actor: actor.name, label: `${oldScore} → ${newScore}` });
+    const actionSnapshot = { players: before, roundIndex, playerIndex, roundStartScores, actor: actor.name, label: `${oldScore} → ${newScore}` };
+    setUndoHistory(history => [...history, actionSnapshot]);
+    setLastAction(actionSnapshot);
     setPlayers(updated); playHalfSound();
     setFlash({ i: playerIndex, type: "half" });
     setScoreAnimation({ type: "half", text: `${oldScore} → ${newScore}` });
@@ -667,18 +677,24 @@ export default function HalfItScoreboard() {
   }
 
   function undoLastThrow() {
-    if (!lastAction) return;
-    setPlayers(lastAction.players);
-    setRoundIndex(lastAction.roundIndex);
-    setPlayerIndex(lastAction.playerIndex);
-    if (lastAction.roundStartScores) setRoundStartScores(lastAction.roundStartScores);
+    const history = undoHistory.length ? undoHistory : (lastAction ? [lastAction] : []);
+    if (!history.length) return;
+
+    const action = history[history.length - 1];
+    const remaining = history.slice(0, -1);
+
+    setPlayers(action.players);
+    setRoundIndex(action.roundIndex);
+    setPlayerIndex(action.playerIndex);
+    if (action.roundStartScores) setRoundStartScores(action.roundStartScores);
     setRoundSummary(false);
     setRoundTransition(null);
     setScoreInput("");
     setDartVisit([]);
     setFlash(null);
     setScoreAnimation(null);
-    setLastAction(null);
+    setUndoHistory(remaining);
+    setLastAction(remaining[remaining.length - 1] || null);
   }
 
   function finishGame(finalPlayers) {
@@ -710,7 +726,7 @@ export default function HalfItScoreboard() {
         bestRound:Math.max(0, ...(p.history || []).filter(h => !h.half).map(h => h.delta || 0)),
         won:gameMode === "multiplayer" && p.score === topScore
       })) };
-    saveGame(record); setPlayers(finalPlayers); localStorage.removeItem(ACTIVE_GAME_KEY); setSavedActiveGame(null); setScreen("results");
+    saveGame(record); setPlayers(finalPlayers); setLastAction(null); setUndoHistory([]); localStorage.removeItem(ACTIVE_GAME_KEY); setSavedActiveGame(null); setScreen("results");
   }
 
   function playAgain() {
@@ -721,6 +737,7 @@ export default function HalfItScoreboard() {
     setDartVisit([]);
     setRoundStartScores(Object.fromEntries(players.map(p => [p.profileId || p.name, 0])));
     setLastAction(null);
+    setUndoHistory([]);
     setRoundSummary(false);
     setScreen("game");
   }
@@ -1049,22 +1066,22 @@ export default function HalfItScoreboard() {
         .fixed-score-copy { color:var(--muted); font-size:12px; margin-bottom:10px; }
         .fixed-score-btn { width:100%; min-height:62px; border-radius:11px; border:1px solid var(--lime); background:linear-gradient(180deg,var(--lime-2),var(--lime)); color:#06121d; font-family:'Oswald',sans-serif; font-size:19px; font-weight:700; text-transform:uppercase; cursor:pointer; }
 
-        .dart-entry { margin-top:14px; }
+        .dart-entry { margin-top:10px; }
         .dart-entry-title { text-align:center; font-family:'Oswald',sans-serif; text-transform:uppercase; font-size:12px; letter-spacing:.08em; color:var(--muted); }
-        .dart-slots { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:9px 0 12px; }
+        .dart-slots { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:7px 0 9px; }
         .dart-slot { min-height:54px; border:1px solid var(--line); border-radius:12px; background:#07131e; display:flex; flex-direction:column; align-items:center; justify-content:center; }
         .dart-slot .dart-no { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
         .dart-slot .dart-result { margin-top:3px; font-family:'Oswald',sans-serif; font-size:16px; font-weight:700; text-transform:uppercase; color:var(--text); }
         .dart-slot.filled { border-color:#35536a; }
         .dart-slot.current { border-color:var(--lime); box-shadow:0 0 0 1px rgba(139,255,0,.12) inset; }
-        .dart-choice-stack { display:flex; flex-direction:column; gap:8px; }
-        .dart-choice { width:100%; min-height:54px; border-radius:13px; border:1px solid #31485b; background:linear-gradient(180deg,#112536,#0a1926); color:var(--text); display:flex; align-items:center; justify-content:space-between; padding:0 18px; cursor:pointer; }
+        .dart-choice-stack { display:flex; flex-direction:column; gap:7px; }
+        .dart-choice { width:100%; min-height:49px; border-radius:12px; border:1px solid #31485b; background:linear-gradient(180deg,#112536,#0a1926); color:var(--text); display:flex; align-items:center; justify-content:space-between; padding:0 17px; cursor:pointer; }
         .dart-choice:active { transform:scale(.985); border-color:var(--lime); background:#142d3f; }
         .dart-choice strong { font-family:'Oswald',sans-serif; font-size:19px; font-style:italic; text-transform:uppercase; }
         .dart-choice span { font-family:'IBM Plex Mono',monospace; color:var(--lime); font-size:14px; font-weight:700; }
         .dart-choice.miss span { color:var(--muted); }
-        .dart-visit-total { margin:10px 0 8px; text-align:center; min-height:28px; font-family:'IBM Plex Mono',monospace; color:var(--lime); font-size:19px; font-weight:700; }
-        .dart-actions { display:grid; grid-template-columns:auto 1fr; gap:8px; }
+        .dart-visit-total { margin:6px 0; text-align:center; font-family:'IBM Plex Mono',monospace; color:var(--lime); font-size:15px; font-weight:700; line-height:1.2; }
+        .dart-actions { display:grid; grid-template-columns:auto 1fr; gap:8px; margin-top:7px; }
         .undo-dart { min-width:104px; border:1px solid var(--line); border-radius:11px; background:transparent; color:var(--muted); font-family:'Oswald',sans-serif; text-transform:uppercase; font-weight:600; cursor:pointer; }
         .add-visit { min-height:56px; border:1px solid var(--lime); border-radius:11px; background:linear-gradient(180deg,var(--lime-2),var(--lime)); color:#06121d; font-family:'Oswald',sans-serif; font-size:18px; font-weight:700; text-transform:uppercase; cursor:pointer; }
         .add-visit:disabled, .undo-dart:disabled { opacity:.35; cursor:not-allowed; }
@@ -1074,7 +1091,20 @@ export default function HalfItScoreboard() {
         .key:active { transform:scale(.97); border-color:var(--lime); }
         .key-enter { background:linear-gradient(180deg,var(--lime-2),var(--lime)); color:#06121d; border-color:var(--lime); font-family:'Oswald',sans-serif; font-size:17px; }
         .key-clear { color:#ff9f92; border-color:#6b3438; background:linear-gradient(180deg,#2a171c,#1c1115); font-family:'Oswald',sans-serif; font-size:15px; }
-        .half-btn { width:100%; margin-top:11px; min-height:58px; border-radius:12px; border:2px solid var(--red); background:transparent; color:var(--red); font-family:'Oswald',sans-serif; font-size:19px; font-weight:700; font-style:italic; text-transform:uppercase; cursor:pointer; }
+        .half-btn {
+          width:100%; margin-top:8px; min-height:54px; border-radius:14px;
+          border:1px solid var(--lime);
+          background:linear-gradient(180deg,rgba(24,45,28,.96),rgba(7,20,16,.98));
+          color:var(--text); font-family:'Oswald',sans-serif; font-weight:700; font-style:italic;
+          text-transform:uppercase; cursor:pointer; display:grid; grid-template-columns:48px 1fr auto;
+          align-items:center; padding:0 15px 0 5px; overflow:hidden;
+          box-shadow:0 0 18px rgba(139,255,0,.16), inset 0 0 20px rgba(139,255,0,.035);
+          transition:transform .12s ease, box-shadow .15s ease, background .15s ease;
+        }
+        .half-btn:active { transform:scale(.985); box-shadow:0 0 26px rgba(139,255,0,.28), inset 0 0 22px rgba(139,255,0,.08); }
+        .half-icon { height:44px; border-radius:11px; display:grid; place-items:center; color:var(--lime); background:rgba(139,255,0,.07); }
+        .half-label { justify-self:start; padding-left:11px; font-size:21px; letter-spacing:.045em; }
+        .half-score { justify-self:end; color:var(--lime); font-family:'IBM Plex Mono',monospace; font-size:15px; font-style:normal; }
 
         .results-list { display:flex; flex-direction:column; gap:8px; margin:16px 0; }
         .result-row { flex-wrap:wrap; border:1px solid var(--line); border-radius:11px; padding:12px 14px; display:flex; align-items:center; gap:12px; background:rgba(255,255,255,.02); }
@@ -1096,9 +1126,21 @@ export default function HalfItScoreboard() {
         .install-panel { display:flex; align-items:center; gap:14px; justify-content:space-between; }
         .install-panel > div { flex:1; }
         .install-btn { width:auto; min-width:112px; padding-left:16px; padding-right:16px; }
+        .resume-panel { border-color:var(--lime); margin-bottom:14px; padding:13px 15px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+        .resume-copy { min-width:0; flex:1; }
+        .resume-title { color:var(--lime); margin-bottom:2px; }
+        .resume-round { font-family:'Oswald',sans-serif; font-size:19px; line-height:1.1; margin-bottom:3px; }
+        .resume-btn { width:auto; min-width:142px; min-height:46px; padding:9px 14px; flex:0 0 auto; font-size:14px; }
         @media (max-width: 430px) {
           .install-panel { align-items:stretch; flex-direction:column; }
           .install-btn { width:100%; }
+          .resume-panel { padding:11px 12px; gap:9px; }
+          .resume-round { font-size:17px; }
+          .resume-btn { min-width:124px; min-height:42px; padding:8px 10px; font-size:13px; }
+        }
+        @media (max-width: 340px) {
+          .resume-panel { flex-wrap:wrap; }
+          .resume-btn { width:100%; }
         }
         .shared-note { text-align:center; color:var(--muted); font-size:11px; margin-top:12px; line-height:1.45; }
         .up-next-score { margin-left:auto; color:var(--text); font-family:'IBM Plex Mono',monospace; font-weight:700; }
@@ -1301,7 +1343,17 @@ export default function HalfItScoreboard() {
         .app-game .keypad { gap:6px; margin-top:6px; }
         .app-game .key { min-height:45px; border-radius:9px; font-size:20px; }
         .app-game .key-enter { font-size:15px; }
-        .app-game .half-btn { margin-top:7px; min-height:44px; border-radius:10px; font-size:16px; }
+        .app-game .dart-entry { margin-top:7px; }
+        .app-game .dart-slots { margin:6px 0 7px; }
+        .app-game .dart-choice-stack { gap:6px; }
+        .app-game .dart-choice { min-height:45px; border-radius:10px; }
+        .app-game .dart-choice strong { font-size:17px; }
+        .app-game .dart-actions { margin-top:6px; }
+        .app-game .add-visit { min-height:48px; font-size:16px; }
+        .app-game .half-btn { margin-top:6px; min-height:47px; border-radius:12px; }
+        .app-game .half-icon { height:39px; }
+        .app-game .half-label { font-size:18px; }
+        .app-game .half-score { font-size:13px; }
 
         @media (max-height: 760px) {
           .app-game { padding-left:10px; padding-right:10px; }
@@ -1322,7 +1374,16 @@ export default function HalfItScoreboard() {
           .app-game .keypad { gap:5px; margin-top:4px; }
           .app-game .key { min-height:38px; font-size:18px; }
           .app-game .key-enter { font-size:13px; }
-          .app-game .half-btn { margin-top:5px; min-height:38px; font-size:14px; }
+          .app-game .dart-entry { margin-top:5px; }
+          .app-game .dart-slot { min-height:47px; }
+          .app-game .dart-choice { min-height:41px; }
+          .app-game .dart-choice strong { font-size:16px; }
+          .app-game .dart-actions { margin-top:5px; }
+          .app-game .add-visit { min-height:43px; font-size:15px; }
+          .app-game .half-btn { margin-top:5px; min-height:43px; }
+          .app-game .half-icon { height:35px; }
+          .app-game .half-label { font-size:16px; }
+          .app-game .half-score { font-size:12px; }
           .app-game .fixed-score-panel { margin-top:5px; padding:7px; }
           .app-game .fixed-score-btn { min-height:40px; }
           .app-game .all-scores summary { padding:5px 9px; font-size:10px; }
@@ -1340,7 +1401,9 @@ export default function HalfItScoreboard() {
           .app-game .now-score { font-size:38px; }
           .app-game .score-display { min-height:31px; }
           .app-game .key { min-height:34px; }
-          .app-game .half-btn { min-height:34px; }
+          .app-game .dart-choice { min-height:38px; }
+          .app-game .half-btn { min-height:39px; }
+          .app-game .half-icon { height:31px; }
         }
       `}</style>
 
@@ -1353,7 +1416,7 @@ export default function HalfItScoreboard() {
           {screen === "game" ? <div className="menu-wrap">
             <button className="icon-btn" onClick={() => setMenuOpen(v => !v)} title="Game menu"><Menu size={18} /></button>
             {menuOpen && <div className="game-menu">
-              {lastAction && <button onClick={() => { undoLastThrow(); setMenuOpen(false); }}><Undo2 size={14}/> Undo Last Entry</button>}
+              {(undoHistory.length > 0 || lastAction) && <button onClick={() => { undoLastThrow(); setMenuOpen(false); }}><Undo2 size={14}/> Undo Last Entry</button>}
               <button onClick={() => { setMenuOpen(false); setScreen("leaderboard"); }}>Leaderboard</button>
               <button onClick={() => { setMenuOpen(false); openAdmin(); }}>Admin / Moderator</button>
               <button className="danger" onClick={() => { if (confirm("Start a new game? Your current game will be lost.")) { localStorage.removeItem(ACTIVE_GAME_KEY); setSavedActiveGame(null); setMenuOpen(false); setScreen("home"); setPlayers([]); } }}>Start New Game</button>
@@ -1381,11 +1444,13 @@ export default function HalfItScoreboard() {
             <img className="home-banner" src="/branding/half-it-banner.png" alt="Half It — Hit. Score. Don’t lose half." />
           </div>
           {savedActiveGame?.players?.length && (
-            <div className="panel" style={{ borderColor: "var(--lime)", marginBottom: 16 }}>
-              <div className="panel-title" style={{ color: "var(--lime)" }}>Game in progress</div>
-              <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 20, marginBottom: 4 }}>Round {(savedActiveGame.roundIndex || 0) + 1} of {ROUNDS.length} · {ROUNDS[savedActiveGame.roundIndex || 0]?.name}</div>
-              <div className="muted small" style={{ marginBottom: 12 }}>{savedActiveGame.roundSummary ? "Round complete — standings ready" : `${savedActiveGame.players[savedActiveGame.playerIndex || 0]?.name || "Player"}'s turn`}</div>
-              <button className="btn btn-lime" onClick={resumeSavedGame}>Resume Game <ChevronRight size={18} /></button>
+            <div className="panel resume-panel">
+              <div className="resume-copy">
+                <div className="panel-title resume-title">Game in progress</div>
+                <div className="resume-round">Round {(savedActiveGame.roundIndex || 0) + 1} of {ROUNDS.length} · {ROUNDS[savedActiveGame.roundIndex || 0]?.name}</div>
+                <div className="muted small">{savedActiveGame.roundSummary ? "Round complete — standings ready" : `${savedActiveGame.players[savedActiveGame.playerIndex || 0]?.name || "Player"}'s turn`}</div>
+              </div>
+              <button className="btn btn-lime resume-btn" onClick={resumeSavedGame}>Resume Game <ChevronRight size={17} /></button>
             </div>
           )}
           {installPrompt && !isInstalledApp && (
@@ -1672,7 +1737,7 @@ export default function HalfItScoreboard() {
                 <button className="dart-choice" onClick={() => selectDartResult("triple")} disabled={dartVisit.length >= 3}><strong>Triple</strong><span>+{round.multiplier * 3}</span></button>
                 <button className="dart-choice miss" onClick={() => selectDartResult("miss")} disabled={dartVisit.length >= 3}><strong>Miss</strong><span>0</span></button>
               </div>
-              <div className="dart-visit-total">{dartVisit.length ? `VISIT: +${dartVisit.reduce((sum,d)=>sum+d.points,0)}` : ""}</div>
+              {dartVisit.length > 0 && <div className="dart-visit-total">VISIT: +{dartVisit.reduce((sum,d)=>sum+d.points,0)}</div>}
               <div className="dart-actions">
                 <button className="undo-dart" onClick={undoDart} disabled={!dartVisit.length}>↶ Undo Dart</button>
                 <button className="add-visit" onClick={submitDartVisit} disabled={dartVisit.length !== 3}>✓ Add {dartVisit.reduce((sum,d)=>sum+d.points,0)} Points</button>
@@ -1714,8 +1779,14 @@ export default function HalfItScoreboard() {
             </>
           )}
 
-          {!roundSummary && <button className="half-btn" onClick={halfIt}>✕ &nbsp; Half It {current ? `· ${current.score} → ${Math.floor(current.score / 2)}` : ""}</button>}
-          {lastAction && <div className="undo-row"><button className="undo-btn" onClick={undoLastThrow}><Undo2 size={14}/> Undo last submitted throw</button></div>}
+          {!roundSummary && (
+            <button className="half-btn" onClick={halfIt}>
+              <span className="half-icon"><Target size={23} strokeWidth={2.5} /></span>
+              <span className="half-label">Half It</span>
+              <span className="half-score">{current ? `${current.score} → ${Math.floor(current.score / 2)}` : ""}</span>
+            </button>
+          )}
+          {/* Submitted-visit undo lives in the game menu to avoid accidental taps. */}
         </div>
       )}
 
