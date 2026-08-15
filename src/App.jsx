@@ -586,7 +586,6 @@ export default function HalfItScoreboard() {
       setRoundIndex(nextIndex);
       setPlayerIndex(0);
       setRoundTransition(null);
-      setLastAction(null);
     }, 650);
   }
 
@@ -597,7 +596,7 @@ export default function HalfItScoreboard() {
       ...p, score: p.score + points,
       history: [...p.history, { round: ROUNDS[roundIndex].name, delta: points, half: false, enteredValue }],
     } : p);
-    setLastAction({ players: before, roundIndex, playerIndex, actor: actor.name, label: `+${points}` });
+    setLastAction({ players: before, roundIndex, playerIndex, roundStartScores, actor: actor.name, label: `+${points}` });
     setPlayers(updated);
     setFlash({ i: playerIndex, type: "score" });
     setScoreAnimation({ type: "score", text: `+${points}` });
@@ -660,7 +659,7 @@ export default function HalfItScoreboard() {
       ...p, score: newScore,
       history: [...p.history, { round: ROUNDS[roundIndex].name, delta: newScore - p.score, half: true }],
     });
-    setLastAction({ players: before, roundIndex, playerIndex, actor: actor.name, label: `${oldScore} → ${newScore}` });
+    setLastAction({ players: before, roundIndex, playerIndex, roundStartScores, actor: actor.name, label: `${oldScore} → ${newScore}` });
     setPlayers(updated); playHalfSound();
     setFlash({ i: playerIndex, type: "half" });
     setScoreAnimation({ type: "half", text: `${oldScore} → ${newScore}` });
@@ -672,7 +671,14 @@ export default function HalfItScoreboard() {
     setPlayers(lastAction.players);
     setRoundIndex(lastAction.roundIndex);
     setPlayerIndex(lastAction.playerIndex);
-    setRoundSummary(false); setRoundTransition(null); setScoreInput(""); setLastAction(null);
+    if (lastAction.roundStartScores) setRoundStartScores(lastAction.roundStartScores);
+    setRoundSummary(false);
+    setRoundTransition(null);
+    setScoreInput("");
+    setDartVisit([]);
+    setFlash(null);
+    setScoreAnimation(null);
+    setLastAction(null);
   }
 
   function finishGame(finalPlayers) {
@@ -1347,6 +1353,7 @@ export default function HalfItScoreboard() {
           {screen === "game" ? <div className="menu-wrap">
             <button className="icon-btn" onClick={() => setMenuOpen(v => !v)} title="Game menu"><Menu size={18} /></button>
             {menuOpen && <div className="game-menu">
+              {lastAction && <button onClick={() => { undoLastThrow(); setMenuOpen(false); }}><Undo2 size={14}/> Undo Last Entry</button>}
               <button onClick={() => { setMenuOpen(false); setScreen("leaderboard"); }}>Leaderboard</button>
               <button onClick={() => { setMenuOpen(false); openAdmin(); }}>Admin / Moderator</button>
               <button className="danger" onClick={() => { if (confirm("Start a new game? Your current game will be lost.")) { localStorage.removeItem(ACTIVE_GAME_KEY); setSavedActiveGame(null); setMenuOpen(false); setScreen("home"); setPlayers([]); } }}>Start New Game</button>
