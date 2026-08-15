@@ -1091,20 +1091,34 @@ export default function HalfItScoreboard() {
         .key:active { transform:scale(.97); border-color:var(--lime); }
         .key-enter { background:linear-gradient(180deg,var(--lime-2),var(--lime)); color:#06121d; border-color:var(--lime); font-family:'Oswald',sans-serif; font-size:17px; }
         .key-clear { color:#ff9f92; border-color:#6b3438; background:linear-gradient(180deg,#2a171c,#1c1115); font-family:'Oswald',sans-serif; font-size:15px; }
-        .half-btn {
-          width:100%; margin-top:8px; min-height:54px; border-radius:14px;
-          border:1px solid var(--lime);
-          background:linear-gradient(180deg,rgba(24,45,28,.96),rgba(7,20,16,.98));
-          color:var(--text); font-family:'Oswald',sans-serif; font-weight:700; font-style:italic;
-          text-transform:uppercase; cursor:pointer; display:grid; grid-template-columns:48px 1fr auto;
-          align-items:center; padding:0 15px 0 5px; overflow:hidden;
-          box-shadow:0 0 18px rgba(139,255,0,.16), inset 0 0 20px rgba(139,255,0,.035);
-          transition:transform .12s ease, box-shadow .15s ease, background .15s ease;
+        @keyframes halfDangerPulse {
+          0%, 100% { box-shadow:0 0 14px rgba(255,74,83,.14), inset 0 0 18px rgba(255,74,83,.025); }
+          50% { box-shadow:0 0 24px rgba(255,74,83,.26), inset 0 0 22px rgba(255,74,83,.055); }
         }
-        .half-btn:active { transform:scale(.985); box-shadow:0 0 26px rgba(139,255,0,.28), inset 0 0 22px rgba(139,255,0,.08); }
-        .half-icon { height:44px; border-radius:11px; display:grid; place-items:center; color:var(--lime); background:rgba(139,255,0,.07); }
-        .half-label { justify-self:start; padding-left:11px; font-size:21px; letter-spacing:.045em; }
-        .half-score { justify-self:end; color:var(--lime); font-family:'IBM Plex Mono',monospace; font-size:15px; font-style:normal; }
+        .half-btn {
+          width:100%; margin-top:8px; min-height:62px; border-radius:15px;
+          border:1px solid #ff4f59;
+          background:linear-gradient(180deg,rgba(69,22,28,.97),rgba(27,10,14,.99));
+          color:var(--text); font-family:'Oswald',sans-serif; font-weight:700; font-style:italic;
+          text-transform:uppercase; cursor:pointer; display:grid; grid-template-columns:54px 1fr auto;
+          align-items:center; padding:0 17px 0 6px; overflow:hidden;
+          animation:halfDangerPulse 2.6s ease-in-out infinite;
+          transition:transform .12s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease;
+        }
+        .half-btn:hover { border-color:#ff6971; background:linear-gradient(180deg,rgba(82,25,32,.98),rgba(31,11,15,.99)); }
+        .half-btn:active {
+          transform:scale(.982);
+          animation:none;
+          background:linear-gradient(180deg,#7a202a,#3b0d14);
+          box-shadow:0 0 34px rgba(255,74,83,.58), inset 0 0 26px rgba(255,74,83,.18);
+        }
+        .half-icon {
+          height:50px; border-radius:12px; display:grid; place-items:center;
+          color:#ff6a73; background:rgba(255,74,83,.10);
+          border:1px solid rgba(255,106,115,.20);
+        }
+        .half-label { justify-self:start; padding-left:12px; font-size:23px; letter-spacing:.05em; }
+        .half-score { justify-self:end; color:#ff747c; font-family:'IBM Plex Mono',monospace; font-size:16px; font-style:normal; font-weight:700; }
 
         .results-list { display:flex; flex-direction:column; gap:8px; margin:16px 0; }
         .result-row { flex-wrap:wrap; border:1px solid var(--line); border-radius:11px; padding:12px 14px; display:flex; align-items:center; gap:12px; background:rgba(255,255,255,.02); }
@@ -1350,10 +1364,10 @@ export default function HalfItScoreboard() {
         .app-game .dart-choice strong { font-size:17px; }
         .app-game .dart-actions { margin-top:6px; }
         .app-game .add-visit { min-height:48px; font-size:16px; }
-        .app-game .half-btn { margin-top:6px; min-height:47px; border-radius:12px; }
-        .app-game .half-icon { height:39px; }
-        .app-game .half-label { font-size:18px; }
-        .app-game .half-score { font-size:13px; }
+        .app-game .half-btn { margin-top:7px; min-height:60px; border-radius:14px; }
+        .app-game .half-icon { height:48px; }
+        .app-game .half-label { font-size:22px; }
+        .app-game .half-score { font-size:15px; }
 
         @media (max-height: 760px) {
           .app-game { padding-left:10px; padding-right:10px; }
@@ -1380,10 +1394,10 @@ export default function HalfItScoreboard() {
           .app-game .dart-choice strong { font-size:16px; }
           .app-game .dart-actions { margin-top:5px; }
           .app-game .add-visit { min-height:43px; font-size:15px; }
-          .app-game .half-btn { margin-top:5px; min-height:43px; }
-          .app-game .half-icon { height:35px; }
-          .app-game .half-label { font-size:16px; }
-          .app-game .half-score { font-size:12px; }
+          .app-game .half-btn { margin-top:6px; min-height:55px; }
+          .app-game .half-icon { height:43px; }
+          .app-game .half-label { font-size:19px; }
+          .app-game .half-score { font-size:13px; }
           .app-game .fixed-score-panel { margin-top:5px; padding:7px; }
           .app-game .fixed-score-btn { min-height:40px; }
           .app-game .all-scores summary { padding:5px 9px; font-size:10px; }
@@ -1402,8 +1416,10 @@ export default function HalfItScoreboard() {
           .app-game .score-display { min-height:31px; }
           .app-game .key { min-height:34px; }
           .app-game .dart-choice { min-height:38px; }
-          .app-game .half-btn { min-height:39px; }
-          .app-game .half-icon { height:31px; }
+          .app-game .half-btn { min-height:50px; }
+          .app-game .half-icon { height:39px; }
+          .app-game .half-label { font-size:17px; }
+          .app-game .half-score { font-size:12px; }
         }
       `}</style>
 
