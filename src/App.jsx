@@ -1093,11 +1093,44 @@ export default function HalfItScoreboard() {
         .add-visit { min-height:56px; border:1px solid var(--lime); border-radius:11px; background:linear-gradient(180deg,var(--lime-2),var(--lime)); color:#06121d; font-family:'Oswald',sans-serif; font-size:18px; font-weight:700; text-transform:uppercase; cursor:pointer; }
         .add-visit:disabled, .undo-dart:disabled { opacity:.35; cursor:not-allowed; }
 
-        .keypad { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; margin-top:11px; }
-        .key { min-height:62px; border-radius:11px; border:1px solid #31485b; background:linear-gradient(180deg,#112536,#0a1926); color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:24px; font-weight:700; cursor:pointer; }
+        .keypad { display:grid; grid-template-columns:repeat(3,1fr); gap:11px; margin-top:13px; }
+        .key {
+          min-height:70px;
+          border-radius:20px;
+          border:1px solid #3b5569;
+          background:linear-gradient(180deg,#142b3d,#0a1926);
+          color:var(--text);
+          font-family:'IBM Plex Mono',monospace;
+          font-size:25px;
+          font-weight:700;
+          cursor:pointer;
+          box-shadow:0 5px 12px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.025);
+          transition:transform .1s ease, border-color .12s ease, background .12s ease, box-shadow .12s ease;
+        }
+        .key:active {
+          transform:scale(.97);
+          border-color:var(--lime);
+          background:linear-gradient(180deg,#1b384d,#0e2231);
+          box-shadow:0 0 15px rgba(139,255,0,.14), inset 0 1px 0 rgba(255,255,255,.035);
+        }
         .key:active { transform:scale(.97); border-color:var(--lime); }
-        .key-enter { background:linear-gradient(180deg,var(--lime-2),var(--lime)); color:#06121d; border-color:var(--lime); font-family:'Oswald',sans-serif; font-size:17px; }
-        .key-clear { color:#ff9f92; border-color:#6b3438; background:linear-gradient(180deg,#2a171c,#1c1115); font-family:'Oswald',sans-serif; font-size:15px; }
+        .key-enter {
+          background:linear-gradient(180deg,var(--lime-2),var(--lime));
+          color:#06121d;
+          border-color:var(--lime);
+          font-family:'Oswald',sans-serif;
+          font-size:18px;
+          border-radius:20px;
+          min-height:68px;
+        }
+        .key-clear {
+          color:#ff9f92;
+          border-color:#6b3438;
+          background:linear-gradient(180deg,#2a171c,#1c1115);
+          font-family:'Oswald',sans-serif;
+          font-size:16px;
+          border-radius:20px;
+        }
         @keyframes halfDangerPulse {
           0%, 100% { box-shadow:0 0 14px rgba(255,74,83,.14), inset 0 0 18px rgba(255,74,83,.025); }
           50% { box-shadow:0 0 24px rgba(255,74,83,.26), inset 0 0 22px rgba(255,74,83,.055); }
@@ -1363,9 +1396,9 @@ export default function HalfItScoreboard() {
         .app-game .fixed-score-panel { margin-top:8px; padding:9px; }
         .app-game .fixed-score-copy { font-size:10px; margin-bottom:6px; }
         .app-game .fixed-score-btn { min-height:46px; font-size:16px; }
-        .app-game .keypad { gap:6px; margin-top:6px; }
-        .app-game .key { min-height:45px; border-radius:9px; font-size:20px; }
-        .app-game .key-enter { font-size:15px; }
+        .app-game .keypad { gap:10px; margin-top:9px; }
+        .app-game .key { min-height:60px; border-radius:18px; font-size:22px; }
+        .app-game .key-enter { min-height:60px; font-size:17px; }
         .app-game .dart-entry { margin-top:7px; }
         .app-game .dart-slots { margin:6px 0 7px; }
         .app-game .dart-choice-stack { gap:6px; }
@@ -1396,9 +1429,9 @@ export default function HalfItScoreboard() {
           .app-game .up-next { margin-top:4px; padding:5px 9px; font-size:11px; }
           .app-game .score-display { margin-top:5px; min-height:35px; font-size:19px; }
           .app-game .score-conversion { min-height:12px; margin-top:2px; font-size:10px; }
-          .app-game .keypad { gap:5px; margin-top:4px; }
-          .app-game .key { min-height:38px; font-size:18px; }
-          .app-game .key-enter { font-size:13px; }
+          .app-game .keypad { gap:8px; margin-top:6px; }
+          .app-game .key { min-height:54px; border-radius:16px; font-size:20px; }
+          .app-game .key-enter { min-height:54px; font-size:16px; }
           .app-game .dart-entry { margin-top:5px; }
           .app-game .dart-slot { min-height:47px; }
           .app-game .dart-choice { min-height:41px; }
@@ -1426,7 +1459,7 @@ export default function HalfItScoreboard() {
           .app-game .now-name { font-size:21px; }
           .app-game .now-score { font-size:38px; }
           .app-game .score-display { min-height:31px; }
-          .app-game .key { min-height:34px; }
+          .app-game .key { min-height:48px; border-radius:15px; }
           .app-game .dart-choice { min-height:38px; }
           .app-game .half-btn { min-height:50px; }
           .app-game .half-icon { height:39px; }
