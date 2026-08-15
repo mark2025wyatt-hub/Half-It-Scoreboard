@@ -780,6 +780,10 @@ export default function HalfItScoreboard() {
       setScoreInput((s) => s.slice(0, -1));
       return;
     }
+    if (value === "clear") {
+      setScoreInput("");
+      return;
+    }
     if (value === "enter") {
       if (scoreInput !== "") submitScore();
       return;
@@ -1063,6 +1067,7 @@ export default function HalfItScoreboard() {
         .key { min-height:62px; border-radius:11px; border:1px solid #31485b; background:linear-gradient(180deg,#112536,#0a1926); color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:24px; font-weight:700; cursor:pointer; }
         .key:active { transform:scale(.97); border-color:var(--lime); }
         .key-enter { background:linear-gradient(180deg,var(--lime-2),var(--lime)); color:#06121d; border-color:var(--lime); font-family:'Oswald',sans-serif; font-size:17px; }
+        .key-clear { color:#ff9f92; border-color:#6b3438; background:linear-gradient(180deg,#2a171c,#1c1115); font-family:'Oswald',sans-serif; font-size:15px; }
         .half-btn { width:100%; margin-top:11px; min-height:58px; border-radius:12px; border:2px solid var(--red); background:transparent; color:var(--red); font-family:'Oswald',sans-serif; font-size:19px; font-weight:700; font-style:italic; text-transform:uppercase; cursor:pointer; }
 
         .results-list { display:flex; flex-direction:column; gap:8px; margin:16px 0; }
@@ -1689,18 +1694,13 @@ export default function HalfItScoreboard() {
                 ))}
 
                 {round.kind === "score" && (
-                  <>
-                    <button className="key" onClick={() => keypadPress("back")} aria-label="Backspace"><Delete size={22} /></button>
-                    <button className="key" onClick={() => keypadPress(0)}>0</button>
-                  </>
+                  <button className="key" onClick={() => keypadPress(0)}>0</button>
                 )}
 
-                {round.kind === "units" && round.max === 6 && (
-                  <>
-                    <button className="key" disabled aria-hidden="true">•</button>
-                    <button className="key" disabled aria-hidden="true">•</button>
-                  </>
-                )}
+                <button className="key" onClick={() => keypadPress("back")} disabled={scoreInput === ""} aria-label="Delete last digit">
+                  <Delete size={22} />
+                </button>
+                <button className="key key-clear" onClick={() => keypadPress("clear")} disabled={scoreInput === ""}>CLEAR</button>
 
                 <button className="key key-enter" disabled={scoreInput === ""} onClick={() => keypadPress("enter")}>ENTER</button>
               </div>
@@ -1708,7 +1708,7 @@ export default function HalfItScoreboard() {
           )}
 
           {!roundSummary && <button className="half-btn" onClick={halfIt}>✕ &nbsp; Half It {current ? `· ${current.score} → ${Math.floor(current.score / 2)}` : ""}</button>}
-          {lastAction && <div className="undo-row"><button className="undo-btn" onClick={undoLastThrow}><Undo2 size={14}/> Undo last throw</button></div>}
+          {lastAction && <div className="undo-row"><button className="undo-btn" onClick={undoLastThrow}><Undo2 size={14}/> Undo last submitted throw</button></div>}
         </div>
       )}
 
