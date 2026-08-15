@@ -1371,7 +1371,7 @@ export default function HalfItScoreboard() {
       {screen === "home" && (
         <div>
           <div className="hero">
-            <img className="home-banner" src="/half-it-banner.png" alt="Half It — Hit. Score. Don’t lose half." />
+            <img className="home-banner" src="/branding/half-it-banner.png" alt="Half It — Hit. Score. Don’t lose half." />
           </div>
           {savedActiveGame?.players?.length && (
             <div className="panel" style={{ borderColor: "var(--lime)", marginBottom: 16 }}>
