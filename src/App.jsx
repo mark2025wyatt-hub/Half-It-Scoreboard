@@ -1806,7 +1806,6 @@ export default function HalfItScoreboard() {
                 <button className="dart-choice" onClick={() => selectDartResult("triple")} disabled={dartVisit.length >= 3}><strong>Triple</strong><span>+{round.multiplier * 3}</span></button>
                 <button className="dart-choice miss" onClick={() => selectDartResult("miss")} disabled={dartVisit.length >= 3}><strong>Miss</strong><span>0</span></button>
               </div>
-              {dartVisit.length > 0 && <div className="dart-visit-total">VISIT: +{dartVisit.reduce((sum,d)=>sum+d.points,0)}</div>}
               <div className="dart-actions">
                 <button className="undo-dart" onClick={undoDart} disabled={!dartVisit.length}>↶ Undo Dart</button>
                 <button className="add-visit" onClick={submitDartVisit} disabled={dartVisit.length !== 3}>✓ Add {dartVisit.reduce((sum,d)=>sum+d.points,0)} Points</button>
