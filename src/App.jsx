@@ -237,6 +237,90 @@ export default function HalfItScoreboard() {
     return () => { try { lock?.release(); } catch {} };
   }, [screen]);
 
+  // Desktop/laptop keyboard controls. These only activate on wide screens and
+  // call the same scoring functions as the mobile UI, so game rules stay identical.
+  useEffect(() => {
+    if (screen !== "game") return;
+
+    function onDesktopKeyDown(e) {
+      if (window.innerWidth < 900) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+
+      const key = e.key.toLowerCase();
+
+      if (key === "h") {
+        e.preventDefault();
+        halfIt();
+        return;
+      }
+
+      if (key === "u") {
+        if (undoHistory.length || lastAction) {
+          e.preventDefault();
+          undoLastThrow();
+        }
+        return;
+      }
+
+      if (isNumberTargetRound()) {
+        if (key === "1") { e.preventDefault(); selectDartResult("single"); return; }
+        if (key === "2") { e.preventDefault(); selectDartResult("double"); return; }
+        if (key === "3") { e.preventDefault(); selectDartResult("triple"); return; }
+        if (key === "0") { e.preventDefault(); selectDartResult("miss"); return; }
+        if (key === "backspace") {
+          if (dartVisit.length) { e.preventDefault(); undoDart(); }
+          return;
+        }
+        if (key === "enter" && dartVisit.length === 3) {
+          e.preventDefault();
+          submitDartVisit();
+        }
+        return;
+      }
+
+      if (round?.kind === "fixed") {
+        if (key === "enter") {
+          e.preventDefault();
+          submitFixedScore();
+        }
+        return;
+      }
+
+      if (/^[0-9]$/.test(key)) {
+        e.preventDefault();
+        keypadPress(Number(key));
+        return;
+      }
+
+      if (key === "backspace") {
+        if (scoreInput !== "") {
+          e.preventDefault();
+          keypadPress("back");
+        }
+        return;
+      }
+
+      if (key === "escape") {
+        if (scoreInput !== "") {
+          e.preventDefault();
+          keypadPress("clear");
+        }
+        return;
+      }
+
+      if (key === "enter" && scoreInput !== "") {
+        e.preventDefault();
+        keypadPress("enter");
+      }
+    }
+
+    window.addEventListener("keydown", onDesktopKeyDown);
+    return () => window.removeEventListener("keydown", onDesktopKeyDown);
+  }, [screen, roundIndex, playerIndex, dartVisit, scoreInput, players, undoHistory, lastAction, roundSummary]);
+
   async function loadPlayerProfiles() {
     setProfilesLoading(true);
     try {
@@ -1073,6 +1157,10 @@ export default function HalfItScoreboard() {
         .fixed-score-copy { color:var(--muted); font-size:12px; margin-bottom:10px; }
         .fixed-score-btn { width:100%; min-height:62px; border-radius:11px; border:1px solid var(--lime); background:linear-gradient(180deg,var(--lime-2),var(--lime)); color:#06121d; font-family:'Oswald',sans-serif; font-size:19px; font-weight:700; text-transform:uppercase; cursor:pointer; }
 
+        .desktop-game-columns,
+        .desktop-player-column,
+        .desktop-score-column { display:contents; }
+        .desktop-key-hint { display:none; }
         .dart-entry { margin-top:10px; }
         .dart-entry-title { text-align:center; font-family:'Oswald',sans-serif; text-transform:uppercase; font-size:12px; letter-spacing:.08em; color:var(--muted); }
         .dart-slots { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:7px 0 9px; }
@@ -1474,6 +1562,302 @@ export default function HalfItScoreboard() {
           .app-game .half-label { font-size:17px; }
           .app-game .half-score { font-size:12px; }
         }
+
+        /* Desktop / laptop presentation only.
+           Mobile rules and component behavior remain unchanged below 900px. */
+        @media (min-width: 900px) {
+          .app.app-game {
+            max-width:1180px;
+            min-height:100vh;
+            padding:20px 28px 32px;
+          }
+
+          .app-game .nav {
+            display:flex;
+            margin-bottom:14px;
+            padding-bottom:12px;
+          }
+
+          .app-game .brand h1 { font-size:20px; }
+          .app-game .brand-app-icon { width:38px; height:38px; }
+          .app-game .menu-trigger { width:44px; height:44px; }
+
+          .game-screen { width:100%; }
+
+          .app-game .round-strip {
+            margin:0 0 12px;
+            padding-bottom:4px;
+            display:grid;
+            grid-template-columns:repeat(15,minmax(0,1fr));
+            gap:5px;
+            overflow:visible;
+          }
+
+          .app-game .round-pill {
+            min-width:0;
+            text-align:center;
+            padding:7px 3px;
+            font-size:10px;
+            border-radius:8px;
+          }
+
+          .app-game .round-top {
+            min-height:92px;
+            margin-bottom:16px;
+            padding:10px 16px;
+            border:1px solid var(--line);
+            border-radius:14px;
+            background:rgba(8,25,37,.54);
+            align-items:center;
+          }
+
+          .app-game .round-name { font-size:44px; }
+          .app-game .round-rule { max-width:none; font-size:12px; }
+          .app-game .round-ring { width:78px; height:78px; }
+
+          .desktop-game-columns {
+            display:grid;
+            grid-template-columns:minmax(340px,.9fr) minmax(460px,1.1fr);
+            gap:22px;
+            align-items:start;
+          }
+
+          .desktop-player-column,
+          .desktop-score-column {
+            display:block;
+            min-width:0;
+          }
+
+          .desktop-player-column {
+            position:relative;
+          }
+
+          .desktop-score-column {
+            padding:18px;
+            border:1px solid var(--line);
+            border-radius:16px;
+            background:linear-gradient(180deg,rgba(11,28,42,.86),rgba(6,18,29,.82));
+            box-shadow:0 12px 34px rgba(0,0,0,.20);
+          }
+
+          .app-game .now-card {
+            min-height:270px;
+            margin-top:0;
+            padding:30px 28px;
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            justify-content:center;
+            text-align:center;
+            border-radius:17px;
+            background:
+              radial-gradient(circle at 50% 20%, rgba(140,240,0,.08), transparent 44%),
+              linear-gradient(180deg,rgba(15,39,55,.96),rgba(7,24,35,.98));
+          }
+
+          .app-game .now-label {
+            font-size:13px;
+            letter-spacing:.12em;
+          }
+
+          .app-game .now-row {
+            width:100%;
+            margin-top:10px;
+            display:flex;
+            flex-direction:column;
+            justify-content:center;
+            align-items:center;
+            gap:2px;
+          }
+
+          .app-game .now-name {
+            font-size:42px;
+            line-height:1;
+          }
+
+          .app-game .now-score {
+            font-size:92px;
+            line-height:.98;
+            margin-top:8px;
+            color:var(--lime-2);
+            text-shadow:0 0 20px rgba(140,240,0,.12);
+          }
+
+          .app-game .up-next {
+            margin-top:12px;
+            min-height:56px;
+            justify-content:center;
+            gap:12px;
+            font-size:13px;
+            border-radius:12px;
+          }
+
+          .app-game .up-next strong { font-size:16px; }
+          .app-game .up-next-score { font-size:18px; }
+
+          .app-game .all-scores {
+            margin-top:12px;
+            border-radius:12px;
+          }
+
+          .app-game .all-scores > summary {
+            padding:9px 12px;
+          }
+
+          .app-game .mini-standings {
+            display:grid;
+            grid-template-columns:repeat(2,minmax(0,1fr));
+            gap:7px;
+            overflow:visible;
+            padding:9px;
+          }
+
+          .app-game .dart-entry {
+            margin-top:0;
+          }
+
+          .app-game .dart-entry-title {
+            font-size:13px;
+            color:var(--text);
+          }
+
+          .desktop-key-hint {
+            display:block;
+            margin:7px 0 12px;
+            text-align:center;
+            color:var(--muted);
+            font-size:11px;
+            line-height:1.5;
+          }
+
+          .desktop-key-hint b {
+            display:inline-block;
+            min-width:22px;
+            padding:1px 5px;
+            margin:0 1px;
+            border:1px solid #365064;
+            border-bottom-width:2px;
+            border-radius:5px;
+            color:var(--text);
+            background:#0c2131;
+            font-family:'IBM Plex Mono',monospace;
+            font-size:10px;
+          }
+
+          .keypad-hint { margin-top:0; }
+
+          .app-game .dart-slots {
+            margin:10px 0 12px;
+            gap:10px;
+          }
+
+          .app-game .dart-slot {
+            min-height:72px;
+            border-radius:12px;
+          }
+
+          .app-game .dart-choice-stack {
+            display:grid;
+            grid-template-columns:repeat(2,minmax(0,1fr));
+            gap:10px;
+          }
+
+          .app-game .dart-choice {
+            min-height:68px;
+            border-radius:13px;
+            padding:0 20px;
+          }
+
+          .app-game .dart-choice strong { font-size:19px; }
+          .app-game .dart-choice span { font-size:16px; }
+
+          .app-game .dart-actions {
+            margin-top:12px;
+            grid-template-columns:160px 1fr;
+            gap:10px;
+          }
+
+          .app-game .undo-dart,
+          .app-game .add-visit {
+            min-height:58px;
+          }
+
+          .app-game .score-display {
+            margin-top:0;
+            min-height:66px;
+            font-size:30px;
+          }
+
+          .app-game .score-conversion {
+            min-height:22px;
+            margin-top:6px;
+            font-size:13px;
+          }
+
+          .app-game .keypad {
+            gap:11px;
+            margin-top:10px;
+          }
+
+          .app-game .key {
+            min-height:70px;
+            border-radius:18px;
+            font-size:24px;
+          }
+
+          .app-game .key-enter {
+            min-height:70px;
+            font-size:18px;
+          }
+
+          .app-game .fixed-score-panel {
+            margin-top:0;
+            padding:22px;
+          }
+
+          .app-game .fixed-score-copy {
+            font-size:13px;
+            margin-bottom:14px;
+          }
+
+          .app-game .fixed-score-btn {
+            min-height:72px;
+            font-size:20px;
+          }
+
+          .app-game .half-btn {
+            min-height:72px;
+            margin-top:14px;
+            grid-template-columns:60px 1fr auto;
+            padding-right:20px;
+            border-radius:15px;
+          }
+
+          .app-game .half-icon { height:56px; }
+          .app-game .half-board-icon { width:39px; height:39px; }
+          .app-game .half-label { font-size:25px; }
+          .app-game .half-score { font-size:17px; }
+
+          .app-game .summary {
+            margin-top:0;
+            min-height:360px;
+          }
+
+          .game-menu {
+            min-width:220px;
+          }
+        }
+
+        @media (min-width: 1200px) {
+          .app.app-game { max-width:1260px; }
+          .desktop-game-columns {
+            grid-template-columns:minmax(390px,.88fr) minmax(520px,1.12fr);
+            gap:26px;
+          }
+          .app-game .now-card { min-height:300px; }
+          .app-game .now-score { font-size:104px; }
+        }
+
       `}</style>
 
       <div className="nav">
@@ -1729,7 +2113,7 @@ export default function HalfItScoreboard() {
       )}
 
       {screen === "game" && current && (
-        <div>
+        <div className="game-screen">
           <div className="round-strip" aria-label="Round progress">
             {ROUNDS.map((r,i) => <div key={r.name} className={`round-pill ${i < roundIndex ? "done" : i === roundIndex ? "current" : ""}`}>{i < roundIndex ? "✓" : ""}{r.name === "Triples" ? "T" : r.name === "Doubles" ? "D" : r.name === "3 Colours" ? "C" : r.name === "Bulls" ? "B" : r.name}</div>)}
           </div>
@@ -1741,6 +2125,8 @@ export default function HalfItScoreboard() {
             <RoundRing roundIndex={roundIndex} />
           </div>
 
+          <div className="desktop-game-columns">
+            <div className="desktop-player-column">
           <div className={`now-card ${flash && flash.i === playerIndex ? (flash.type === "score" ? "flash-score" : "flash-half") : ""}`}>
             <div className="now-label">Now Throwing</div>
             <div className="now-row">
@@ -1772,6 +2158,8 @@ export default function HalfItScoreboard() {
             </details>
           )}
 
+            </div>
+            <div className="desktop-score-column">
           {roundSummary && gameMode === "multiplayer" ? (
             <div className="summary">
               <h3>Round {roundIndex + 1} Complete</h3>
@@ -1793,6 +2181,7 @@ export default function HalfItScoreboard() {
           ) : isNumberTargetRound() ? (
             <div className="dart-entry">
               <div className="dart-entry-title">Score each dart · Target {round.name}</div>
+              <div className="desktop-key-hint">Keyboard: <b>1</b> Single · <b>2</b> Double · <b>3</b> Triple · <b>0</b> Miss · <b>Enter</b> Submit</div>
               <div className="dart-slots">
                 {[0,1,2].map(i => {
                   const d = dartVisit[i];
@@ -1825,6 +2214,7 @@ export default function HalfItScoreboard() {
                 </div>
               )}
 
+              <div className="desktop-key-hint keypad-hint">Keyboard: type score · <b>Enter</b> Submit · <b>Backspace</b> Delete · <b>H</b> Half It</div>
               <div className="keypad">
                 {(round.kind === "units"
                   ? Array.from({ length: round.max - round.min + 1 }, (_, i) => i + round.min)
@@ -1869,6 +2259,8 @@ export default function HalfItScoreboard() {
             </button>
           )}
           {/* Submitted-visit undo lives in the game menu to avoid accidental taps. */}
+            </div>
+          </div>
         </div>
       )}
 
